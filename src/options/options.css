@@ -1,0 +1,23 @@
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+.options {
+  max-width: 480px;
+  margin: 40px auto;
+  padding: 0 24px;
+}
+
+.options h1 {
+  font-size: 20px;
+}
+
+.options p {
+  color: #555;
+}
