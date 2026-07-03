@@ -1,0 +1,26 @@
+export const MESSAGE_TYPE = {
+  PING: "switchboard/ping",
+  WEB_STORAGE_COLLECT: "switchboard/web-storage/collect",
+  WEB_STORAGE_CLEAR: "switchboard/web-storage/clear",
+  WEB_STORAGE_RESTORE: "switchboard/web-storage/restore",
+  INDEXED_DB_SUPPORTED: "switchboard/indexed-db/supported",
+  INDEXED_DB_COLLECT: "switchboard/indexed-db/collect",
+  INDEXED_DB_CLEAR: "switchboard/indexed-db/clear",
+  INDEXED_DB_RESTORE: "switchboard/indexed-db/restore",
+  CACHE_STORAGE_SUPPORTED: "switchboard/cache-storage/supported",
+  CACHE_STORAGE_COLLECT: "switchboard/cache-storage/collect",
+  CACHE_STORAGE_CLEAR: "switchboard/cache-storage/clear",
+  CACHE_STORAGE_RESTORE: "switchboard/cache-storage/restore",
+  SESSION_CAPTURE: "switchboard/session/capture",
+  SESSION_RESTORE: "switchboard/session/restore",
+  SESSION_CLEAR: "switchboard/session/clear",
+  ACCOUNT_LIST: "switchboard/account/list",
+  ACCOUNT_SAVE: "switchboard/account/save",
+  ACCOUNT_SWITCH: "switchboard/account/switch",
+  ACCOUNT_RENAME: "switchboard/account/rename",
+  ACCOUNT_REPLACE: "switchboard/account/replace",
+  ACCOUNT_DUPLICATE: "switchboard/account/duplicate",
+  ACCOUNT_DELETE: "switchboard/account/delete",
+} as const;
+
+export type MessageType = (typeof MESSAGE_TYPE)[keyof typeof MESSAGE_TYPE];
