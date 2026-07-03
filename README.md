@@ -4,9 +4,10 @@ A browser extension for instantly switching between multiple accounts on
 websites that don't natively support account switching, without needing
 separate browser profiles.
 
-This repository currently contains the **extension foundation** only:
-project structure, build tooling, messaging, storage, and the shell UI.
-Session snapshotting and account switching are not implemented yet.
+This repository captures a website's authenticated browser state (cookies,
+local storage, session storage, IndexedDB, and Cache Storage) as a named
+account snapshot, then restores it on demand — covering account save,
+switch, and logout end to end.
 
 ## How to use Switchboard
 
