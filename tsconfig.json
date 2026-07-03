@@ -19,7 +19,7 @@
     "paths": {
       "@/*": ["src/*"]
     },
-    "types": ["chrome", "vite/client"]
+    "types": ["chrome", "vite/client", "node"]
   },
   "include": ["src", "vite.config.ts"],
   "exclude": ["node_modules", "dist"]

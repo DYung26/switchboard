@@ -14,7 +14,7 @@ function buildMessageBus(
         throw new Error(`No fake handler for "${message.type}"`);
       }
       return handler(message.payload);
-    }),
+    }) as MessageBus["sendToTab"],
     on: vi.fn(),
   };
 }

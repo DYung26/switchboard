@@ -11,7 +11,9 @@ function createChromeStorageMock() {
   >();
 
   const local: Partial<chrome.storage.StorageArea> = {
-    get: vi.fn(async (key: string) => ({ [key]: store.get(key) })),
+    get: vi.fn(async (key: string) => ({
+      [key]: store.get(key),
+    })) as unknown as chrome.storage.StorageArea["get"],
     set: vi.fn(async (items: Record<string, unknown>) => {
       for (const [key, value] of Object.entries(items)) {
         const oldValue = store.get(key);

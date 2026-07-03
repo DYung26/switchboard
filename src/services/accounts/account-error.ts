@@ -10,7 +10,7 @@ export type AccountErrorCode =
 
 export class AccountError extends Error {
   readonly code: AccountErrorCode;
-  readonly cause: unknown;
+  override readonly cause: unknown;
 
   constructor(code: AccountErrorCode, message: string, cause?: unknown) {
     super(message);

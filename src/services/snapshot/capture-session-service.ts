@@ -7,11 +7,25 @@ import {
   describeMechanismFailures,
   type MechanismFailure,
 } from "./snapshot-error";
-import type { SessionSnapshot, SessionSnapshotData } from "@/types";
+import type { SessionSnapshot, SessionSnapshotData, StorageMechanism } from "@/types";
 import { SNAPSHOT_SCHEMA_VERSION } from "@/types";
 
 export interface CaptureSessionService {
   captureCurrentSession(): Promise<SessionSnapshot>;
+}
+
+// Correlates the mechanism key across the read (`registry[mechanism].collect`)
+// and write (`data[mechanism] = ...`) sides through a single type parameter.
+// Without this, TypeScript widens the write side to an intersection of every
+// mechanism's data type, which the union returned by `collect` can never satisfy.
+async function captureMechanism<TMechanism extends StorageMechanism>(
+  registry: CollectorRegistry,
+  data: SessionSnapshotData,
+  mechanism: TMechanism,
+  origin: string,
+  tabId: number,
+): Promise<void> {
+  data[mechanism] = await registry[mechanism].collect(origin, tabId);
 }
 
 export function createCaptureSessionService(
@@ -26,7 +40,7 @@ export function createCaptureSessionService(
 
       for (const mechanism of mechanisms) {
         try {
-          data[mechanism] = await registry[mechanism].collect(origin, tabId);
+          await captureMechanism(registry, data, mechanism, origin, tabId);
         } catch (error) {
           failures.push({ mechanism, error });
         }

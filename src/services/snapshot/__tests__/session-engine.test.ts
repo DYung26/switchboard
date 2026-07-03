@@ -8,7 +8,7 @@ import { MESSAGE_TYPE } from "@/constants/messages";
 function buildFakeBus(): MessageBus {
   return {
     send: vi.fn(),
-    sendToTab: vi.fn(async () => ({})),
+    sendToTab: vi.fn(async () => ({})) as MessageBus["sendToTab"],
     on: vi.fn(() => () => {}),
   };
 }

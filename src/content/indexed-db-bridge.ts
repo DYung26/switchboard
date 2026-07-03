@@ -274,7 +274,7 @@ async function restoreDatabase(
           target.deleteObjectStore(store.name);
         }
         const created = target.createObjectStore(store.name, {
-          keyPath: store.keyPath ?? undefined,
+          keyPath: store.keyPath,
           autoIncrement: store.autoIncrement,
         });
         for (const index of store.indexes) {

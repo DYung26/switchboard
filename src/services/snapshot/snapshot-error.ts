@@ -14,7 +14,7 @@ export type SnapshotErrorCode =
 
 export class SnapshotError extends Error {
   readonly code: SnapshotErrorCode;
-  readonly cause: unknown;
+  override readonly cause: unknown;
 
   constructor(code: SnapshotErrorCode, message: string, cause?: unknown) {
     super(message);

@@ -13,13 +13,13 @@ const MECHANISM_TO_KIND = {
   [STORAGE_MECHANISM.SESSION_STORAGE]: WEB_STORAGE_KIND.SESSION,
 } as const;
 
-export function createWebStorageCollector(
-  mechanism: WebStorageMechanism,
+export function createWebStorageCollector<TMechanism extends WebStorageMechanism>(
+  mechanism: TMechanism,
   bus: MessageBus,
-): StorageCollector<WebStorageMechanism> {
+): StorageCollector<TMechanism> {
   const kind = MECHANISM_TO_KIND[mechanism];
 
-  return {
+  const collector: StorageCollector<WebStorageMechanism> = {
     mechanism,
 
     async collect(_origin: string, tabId: number): Promise<WebStorageRecords> {
@@ -47,4 +47,6 @@ export function createWebStorageCollector(
       });
     },
   };
+
+  return collector as StorageCollector<TMechanism>;
 }

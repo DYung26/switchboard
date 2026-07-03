@@ -10,13 +10,29 @@ import {
   describeMechanismFailures,
   type MechanismFailure,
 } from "./snapshot-error";
-import type { StoredSessionSnapshot } from "@/types";
+import type {
+  SessionSnapshotData,
+  StorageMechanism,
+  StoredSessionSnapshot,
+} from "@/types";
 import { createLogger } from "@/utils/logger";
 
 const logger = createLogger("background");
 
 export interface RestoreSessionService {
   restoreSession(snapshot: StoredSessionSnapshot): Promise<void>;
+}
+
+// See `captureMechanism` in `capture-session-service.ts` for why this
+// correlation has to go through a single type parameter.
+async function restoreMechanism<TMechanism extends StorageMechanism>(
+  registry: CollectorRegistry,
+  mechanism: TMechanism,
+  origin: string,
+  tabId: number,
+  data: SessionSnapshotData[TMechanism],
+): Promise<void> {
+  await registry[mechanism].restore(origin, tabId, data);
 }
 
 export function createRestoreSessionService(
@@ -58,7 +74,9 @@ export function createRestoreSessionService(
 
       for (const mechanism of mechanisms) {
         try {
-          await registry[mechanism].restore(
+          await restoreMechanism(
+            registry,
+            mechanism,
             origin,
             tabId,
             snapshot.data[mechanism],

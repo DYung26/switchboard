@@ -7,7 +7,7 @@ import type { MessageBus } from "@/types";
 function buildMessageBus(sendToTabResult: unknown = undefined): MessageBus {
   return {
     send: vi.fn(),
-    sendToTab: vi.fn(async () => sendToTabResult),
+    sendToTab: vi.fn(async () => sendToTabResult) as MessageBus["sendToTab"],
     on: vi.fn(),
   };
 }

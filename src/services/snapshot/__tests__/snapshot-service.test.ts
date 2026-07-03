@@ -22,9 +22,9 @@ function buildFakeBus(): TestMessageBus {
   const handlers = new Map<string, (payload: unknown) => unknown>();
   return {
     send: vi.fn(),
-    sendToTab: vi.fn(),
+    sendToTab: vi.fn() as MessageBus["sendToTab"],
     on: vi.fn((type, handler) => {
-      handlers.set(type, handler);
+      handlers.set(type, handler as (payload: unknown) => unknown);
       return () => {};
     }),
     getHandler: (type) => handlers.get(type)!,
