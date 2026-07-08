@@ -5,6 +5,7 @@ export interface SavedAccount {
   origin: string;
   name: string;
   snapshot: SessionSnapshot;
+  position: number;
   createdAt: number;
   updatedAt: number;
   lastUsed: number | undefined;

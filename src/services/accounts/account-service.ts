@@ -20,6 +20,11 @@ interface RenamePayload extends AccountRefPayload {
   name: string;
 }
 
+interface ReorderPayload {
+  origin: string;
+  orderedIds: string[];
+}
+
 function assertValidName(name: string): void {
   if (!name) {
     throw new AccountError(
@@ -38,6 +43,12 @@ function buildDuplicateName(existingNames: string[], baseName: string): string {
     attempt += 1;
   }
   return candidate;
+}
+
+function nextPosition(existing: SavedAccount[]): number {
+  return (
+    existing.reduce((max, account) => Math.max(max, account.position), -1) + 1
+  );
 }
 
 export function createAccountService(
@@ -95,6 +106,7 @@ export function createAccountService(
           assertValidName(trimmedName);
           await assertUniqueName(origin, trimmedName);
 
+          const siblings = await repository.listByOrigin(origin);
           const snapshot = await engine.captureCurrentSession();
           const now = Date.now();
           const account: SavedAccount = {
@@ -102,6 +114,7 @@ export function createAccountService(
             origin,
             name: trimmedName,
             snapshot,
+            position: nextPosition(siblings),
             createdAt: now,
             updatedAt: now,
             lastUsed: undefined,
@@ -117,6 +130,7 @@ export function createAccountService(
           const account = await requireAccount(origin, accountId);
           await engine.restoreSession(account.snapshot);
           await repository.upsert({ ...account, lastUsed: Date.now() });
+          await repository.setActiveId(origin, accountId);
         },
       );
 
@@ -168,6 +182,7 @@ export function createAccountService(
             ...account,
             id: crypto.randomUUID(),
             name,
+            position: nextPosition(siblings),
             createdAt: now,
             updatedAt: now,
             lastUsed: undefined,
@@ -182,6 +197,17 @@ export function createAccountService(
         async ({ accountId, origin }) => {
           await requireAccount(origin, accountId);
           await repository.delete(origin, accountId);
+          const activeId = await repository.getActiveId(origin);
+          if (activeId === accountId) {
+            await repository.clearActiveId(origin);
+          }
+        },
+      );
+
+      bus.on<ReorderPayload, SavedAccount[]>(
+        MESSAGE_TYPE.ACCOUNT_REORDER,
+        async ({ origin, orderedIds }) => {
+          return repository.reorder(origin, orderedIds);
         },
       );
     },

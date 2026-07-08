@@ -3,7 +3,7 @@ import { storageService } from "@/storage";
 
 export function useStorageValue<T>(
   key: string,
-): readonly [T | undefined, (value: T) => Promise<void>] {
+): readonly [T | undefined, (value: T) => Promise<void>, () => Promise<void>] {
   const [value, setValue] = useState<T | undefined>(undefined);
 
   useEffect(() => {
@@ -34,5 +34,9 @@ export function useStorageValue<T>(
     [key],
   );
 
-  return [value, update] as const;
+  const remove = useCallback(async () => {
+    await storageService.remove(key);
+  }, [key]);
+
+  return [value, update, remove] as const;
 }

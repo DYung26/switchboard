@@ -6,12 +6,20 @@ import { AccountActionsMenu } from "./AccountActionsMenu";
 interface AccountItemProps {
   account: SavedAccount;
   isActive: boolean;
+  isDropTarget: boolean;
+  dragHandleProps: DragHandleProps;
   onSwitch: () => void;
   onRename: () => void;
   onReplace: () => void;
   onDuplicate: () => void;
   onViewRaw: () => void;
   onDelete: () => void;
+}
+
+export interface DragHandleProps {
+  draggable: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
 }
 
 function describeMeta(account: SavedAccount): { label: string; title: string } {
@@ -35,6 +43,8 @@ function describeMeta(account: SavedAccount): { label: string; title: string } {
 export function AccountItem({
   account,
   isActive,
+  isDropTarget,
+  dragHandleProps,
   onSwitch,
   onRename,
   onReplace,
@@ -67,8 +77,30 @@ export function AccountItem({
 
   const meta = describeMeta(account);
 
+  const rootClassName = [
+    "account-item",
+    isActive && "account-item--active",
+    isDropTarget && "account-item--drop-target",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className={`account-item${isActive ? " account-item--active" : ""}`}>
+    <div className={rootClassName}>
+      <span
+        className="account-item__drag-handle"
+        draggable={dragHandleProps.draggable}
+        onDragStart={dragHandleProps.onDragStart}
+        onDragEnd={dragHandleProps.onDragEnd}
+        title={
+          dragHandleProps.draggable
+            ? "Drag to reorder"
+            : "Clear search to reorder"
+        }
+        aria-hidden="true"
+      >
+        ☰
+      </span>
       <div className="account-item__info">
         <span className="account-item__name">{account.name}</span>
         <span className="account-item__meta" title={meta.title}>
@@ -76,6 +108,7 @@ export function AccountItem({
         </span>
       </div>
       <div className="account-item__actions">
+        {isActive && <span className="account-item__badge">Active</span>}
         {!isActive && (
           <button
             className="btn btn--primary btn--sm"
@@ -85,7 +118,6 @@ export function AccountItem({
             Switch
           </button>
         )}
-        {isActive && <span className="account-item__badge">Active</span>}
         <AccountActionsMenu
           onRename={onRename}
           onReplace={onReplace}

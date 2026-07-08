@@ -21,6 +21,7 @@ export const MESSAGE_TYPE = {
   ACCOUNT_REPLACE: "switchboard/account/replace",
   ACCOUNT_DUPLICATE: "switchboard/account/duplicate",
   ACCOUNT_DELETE: "switchboard/account/delete",
+  ACCOUNT_REORDER: "switchboard/account/reorder",
 } as const;
 
 export type MessageType = (typeof MESSAGE_TYPE)[keyof typeof MESSAGE_TYPE];

@@ -25,6 +25,7 @@ function buildAccount(overrides: Partial<SavedAccount> = {}): SavedAccount {
         cacheStorage: [],
       },
     },
+    position: 0,
     createdAt: 1_000,
     updatedAt: 1_000,
     lastUsed: undefined,
@@ -55,9 +56,12 @@ function buildFakeBus() {
 
 function buildFakeRepository(initial: SavedAccount[] = []): AccountRepository {
   let accounts = [...initial];
+  const activeIds = new Map<string, string>();
   return {
     async listByOrigin(origin) {
-      return accounts.filter((a) => a.origin === origin);
+      return accounts
+        .filter((a) => a.origin === origin)
+        .sort((a, b) => a.position - b.position);
     },
     async getById(origin, id) {
       return accounts.find((a) => a.origin === origin && a.id === id);
@@ -72,6 +76,26 @@ function buildFakeRepository(initial: SavedAccount[] = []): AccountRepository {
     },
     async delete(origin, id) {
       accounts = accounts.filter((a) => !(a.origin === origin && a.id === id));
+    },
+    async reorder(origin, orderedIds) {
+      const positioned = orderedIds
+        .map((id) => accounts.find((a) => a.origin === origin && a.id === id))
+        .filter((a): a is SavedAccount => a !== undefined)
+        .map((account, index) => ({ ...account, position: index }));
+      accounts = accounts.map(
+        (account) =>
+          positioned.find((p) => p.id === account.id) ?? account,
+      );
+      return positioned;
+    },
+    async getActiveId(origin) {
+      return activeIds.get(origin);
+    },
+    async setActiveId(origin, accountId) {
+      activeIds.set(origin, accountId);
+    },
+    async clearActiveId(origin) {
+      activeIds.delete(origin);
     },
   };
 }
@@ -109,6 +133,24 @@ describe("createAccountService", () => {
     await expect(
       repository.listByOrigin("https://example.com"),
     ).resolves.toHaveLength(1);
+  });
+
+  it("assigns each new account the next position after its siblings", async () => {
+    const existing = buildAccount({
+      id: "acc-1",
+      origin: "https://example.com",
+      name: "Personal",
+      position: 3,
+    });
+    const repository = buildFakeRepository([existing]);
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, buildFakeEngine(), repository).init();
+
+    const saved = await trigger<SavedAccount>(MESSAGE_TYPE.ACCOUNT_SAVE, {
+      name: "Work",
+    });
+
+    expect(saved.position).toBe(4);
   });
 
   it("rejects saving a blank account name", async () => {
@@ -149,6 +191,22 @@ describe("createAccountService", () => {
     expect(engine.restoreSession).toHaveBeenCalledWith(account.snapshot);
     const updated = await repository.getById(account.origin, account.id);
     expect(updated?.lastUsed).toBeTypeOf("number");
+  });
+
+  it("marks the switched-to account as active for its origin", async () => {
+    const account = buildAccount();
+    const repository = buildFakeRepository([account]);
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, buildFakeEngine(), repository).init();
+
+    await trigger(MESSAGE_TYPE.ACCOUNT_SWITCH, {
+      accountId: account.id,
+      origin: account.origin,
+    });
+
+    await expect(repository.getActiveId(account.origin)).resolves.toBe(
+      account.id,
+    );
   });
 
   it("throws NOT_FOUND when switching to a missing account", async () => {
@@ -233,6 +291,7 @@ describe("createAccountService", () => {
     expect(duplicate.name).toBe("Personal (Copy)");
     expect(duplicate.snapshot).toEqual(account.snapshot);
     expect(duplicate.lastUsed).toBeUndefined();
+    expect(duplicate.position).toBe(account.position + 1);
     await expect(
       repository.listByOrigin(account.origin),
     ).resolves.toHaveLength(2);
@@ -270,6 +329,62 @@ describe("createAccountService", () => {
     await expect(
       repository.listByOrigin(account.origin),
     ).resolves.toEqual([]);
+  });
+
+  it("clears the active account marker when the active account is deleted", async () => {
+    const account = buildAccount();
+    const repository = buildFakeRepository([account]);
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, buildFakeEngine(), repository).init();
+    await trigger(MESSAGE_TYPE.ACCOUNT_SWITCH, {
+      accountId: account.id,
+      origin: account.origin,
+    });
+
+    await trigger(MESSAGE_TYPE.ACCOUNT_DELETE, {
+      accountId: account.id,
+      origin: account.origin,
+    });
+
+    await expect(
+      repository.getActiveId(account.origin),
+    ).resolves.toBeUndefined();
+  });
+
+  it("leaves the active account marker alone when a different account is deleted", async () => {
+    const active = buildAccount({ id: "acc-1" });
+    const other = buildAccount({ id: "acc-2" });
+    const repository = buildFakeRepository([active, other]);
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, buildFakeEngine(), repository).init();
+    await trigger(MESSAGE_TYPE.ACCOUNT_SWITCH, {
+      accountId: active.id,
+      origin: active.origin,
+    });
+
+    await trigger(MESSAGE_TYPE.ACCOUNT_DELETE, {
+      accountId: other.id,
+      origin: other.origin,
+    });
+
+    await expect(repository.getActiveId(active.origin)).resolves.toBe(
+      active.id,
+    );
+  });
+
+  it("reorders accounts for an origin", async () => {
+    const a = buildAccount({ id: "a", position: 0 });
+    const b = buildAccount({ id: "b", position: 1 });
+    const repository = buildFakeRepository([a, b]);
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, buildFakeEngine(), repository).init();
+
+    const reordered = await trigger<SavedAccount[]>(
+      MESSAGE_TYPE.ACCOUNT_REORDER,
+      { origin: a.origin, orderedIds: ["b", "a"] },
+    );
+
+    expect(reordered.map((acc) => acc.id)).toEqual(["b", "a"]);
   });
 
   it("throws NOT_FOUND when deleting a missing account", async () => {

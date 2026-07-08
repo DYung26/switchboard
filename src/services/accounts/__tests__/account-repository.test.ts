@@ -22,6 +22,7 @@ function buildAccount(overrides: Partial<SavedAccount> = {}): SavedAccount {
         cacheStorage: [],
       },
     },
+    position: 0,
     createdAt: 1_000,
     updatedAt: 1_000,
     lastUsed: undefined,
@@ -78,14 +79,14 @@ describe("createAccountRepository", () => {
     expect(accounts).toEqual([renamed]);
   });
 
-  it("orders accounts by most recently used, falling back to most recently updated", async () => {
+  it("orders accounts by position ascending", async () => {
     const repository = createAccountRepository(buildFakeStorage());
-    const older = buildAccount({ id: "acc-1", updatedAt: 1_000, lastUsed: 2_000 });
-    const newer = buildAccount({ id: "acc-2", updatedAt: 5_000, lastUsed: undefined });
-    await repository.upsert(older);
-    await repository.upsert(newer);
+    const second = buildAccount({ id: "acc-1", position: 1 });
+    const first = buildAccount({ id: "acc-2", position: 0 });
+    await repository.upsert(second);
+    await repository.upsert(first);
 
-    const accounts = await repository.listByOrigin(older.origin);
+    const accounts = await repository.listByOrigin(second.origin);
     expect(accounts.map((a) => a.id)).toEqual(["acc-2", "acc-1"]);
   });
 
@@ -154,5 +155,76 @@ describe("createAccountRepository", () => {
     await expect(repository.upsert(buildAccount())).rejects.toBeInstanceOf(
       AccountError,
     );
+  });
+
+  it("assigns positions to legacy accounts missing one, ordered by createdAt", async () => {
+    const legacy = buildAccount({ id: "acc-1", createdAt: 2_000 });
+    const legacyRaw = { ...legacy } as Record<string, unknown>;
+    delete legacyRaw.position;
+    const olderLegacy = buildAccount({ id: "acc-2", createdAt: 1_000 });
+    const olderLegacyRaw = { ...olderLegacy } as Record<string, unknown>;
+    delete olderLegacyRaw.position;
+
+    const storage = buildFakeStorage({
+      "accounts:https://example.com": [legacyRaw, olderLegacyRaw],
+    });
+    const repository = createAccountRepository(storage);
+
+    const accounts = await repository.listByOrigin("https://example.com");
+    expect(accounts.map((a) => ({ id: a.id, position: a.position }))).toEqual([
+      { id: "acc-2", position: 0 },
+      { id: "acc-1", position: 1 },
+    ]);
+  });
+
+  describe("reorder", () => {
+    it("applies a new position to every account for the origin", async () => {
+      const repository = createAccountRepository(buildFakeStorage());
+      const a = buildAccount({ id: "a", position: 0 });
+      const b = buildAccount({ id: "b", position: 1 });
+      const c = buildAccount({ id: "c", position: 2 });
+      await repository.upsert(a);
+      await repository.upsert(b);
+      await repository.upsert(c);
+
+      const reordered = await repository.reorder(a.origin, ["c", "a", "b"]);
+
+      expect(reordered.map((acc) => acc.id)).toEqual(["c", "a", "b"]);
+      expect(reordered.map((acc) => acc.position)).toEqual([0, 1, 2]);
+    });
+
+    it("keeps accounts missing from orderedIds, appended after the ranked ones", async () => {
+      const repository = createAccountRepository(buildFakeStorage());
+      const a = buildAccount({ id: "a", position: 0 });
+      const b = buildAccount({ id: "b", position: 1 });
+      await repository.upsert(a);
+      await repository.upsert(b);
+
+      const reordered = await repository.reorder(a.origin, ["b"]);
+
+      expect(reordered.map((acc) => acc.id)).toEqual(["b", "a"]);
+    });
+  });
+
+  describe("active account tracking", () => {
+    it("returns undefined when no account is active for an origin", async () => {
+      const repository = createAccountRepository(buildFakeStorage());
+      await expect(
+        repository.getActiveId("https://example.com"),
+      ).resolves.toBeUndefined();
+    });
+
+    it("persists and clears the active account id", async () => {
+      const repository = createAccountRepository(buildFakeStorage());
+      await repository.setActiveId("https://example.com", "acc-1");
+      await expect(
+        repository.getActiveId("https://example.com"),
+      ).resolves.toBe("acc-1");
+
+      await repository.clearActiveId("https://example.com");
+      await expect(
+        repository.getActiveId("https://example.com"),
+      ).resolves.toBeUndefined();
+    });
   });
 });

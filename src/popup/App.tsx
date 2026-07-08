@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SavedAccount } from "@/types/account";
+import { SORT_ORDER, type SortOrder } from "@/types/sort";
 import { MESSAGE_TYPE } from "@/constants/messages";
+import {
+  activeAccountStorageKey,
+  DEFAULT_SORT_ORDER,
+  SORT_ORDER_STORAGE_KEY,
+} from "@/constants/app";
 import { sendMessage } from "@/messaging/send-message";
+import { useStorageValue } from "@/hooks";
 import { filterAccountsByQuery } from "@/utils/filter-accounts";
+import { sortAccounts } from "@/utils/sort-accounts";
+import { reorderIds } from "@/utils/reorder-ids";
 import { getErrorMessage } from "@/utils/get-error-message";
 import { AccountItem } from "./components/AccountItem";
 import { SaveAccountForm } from "./components/SaveAccountForm";
@@ -17,6 +26,15 @@ interface RenameState {
 
 interface ErrorState {
   message: string;
+}
+
+interface ReorderPayload {
+  origin: string;
+  orderedIds: string[];
+}
+
+interface AppProps {
+  variant?: "popup" | "sidepanel";
 }
 
 async function getActiveOrigin(): Promise<string | undefined> {
@@ -35,7 +53,9 @@ function isUnsupportedOrigin(origin: string): boolean {
   return UNSUPPORTED_SCHEMES.some((scheme) => origin.startsWith(scheme));
 }
 
-export function App(): JSX.Element {
+export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
+  const rootClassName =
+    variant === "sidepanel" ? "popup popup--sidepanel" : "popup";
   const [origin, setOrigin] = useState<string | undefined>(undefined);
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [view, setView] = useState<View>("list");
@@ -47,10 +67,19 @@ export function App(): JSX.Element {
   const [switching, setSwitching] = useState<string | undefined>(undefined);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<ErrorState | undefined>(undefined);
-  const [lastSwitchedId, setLastSwitchedId] = useState<string | undefined>(
-    undefined,
-  );
   const [query, setQuery] = useState("");
+  const [draggedId, setDraggedId] = useState<string | undefined>(undefined);
+  const [dragOverId, setDragOverId] = useState<string | undefined>(undefined);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const [activeAccountId, , clearActiveAccountId] = useStorageValue<string>(
+    origin ? activeAccountStorageKey(origin) : "",
+  );
+  const [sortOrder, setSortOrder] = useStorageValue<SortOrder>(
+    SORT_ORDER_STORAGE_KEY,
+  );
+  const effectiveSortOrder = sortOrder ?? DEFAULT_SORT_ORDER;
 
   const loadAccounts = useCallback(async (o: string): Promise<void> => {
     const result = await sendMessage<{ origin: string }, SavedAccount[]>(
@@ -60,21 +89,75 @@ export function App(): JSX.Element {
     setAccounts(result);
   }, []);
 
-  useEffect(() => {
-    void (async () => {
-      const o = await getActiveOrigin();
-      setOrigin(o);
-      if (o && !isUnsupportedOrigin(o)) {
-        await loadAccounts(o);
-      }
-      setLoading(false);
-    })();
+  const refreshActiveTab = useCallback(async (): Promise<void> => {
+    const o = await getActiveOrigin();
+    setOrigin(o);
+    if (o && !isUnsupportedOrigin(o)) {
+      await loadAccounts(o);
+    } else {
+      setAccounts([]);
+    }
   }, [loadAccounts]);
 
-  const filteredAccounts = useMemo(
-    () => filterAccountsByQuery(accounts, query),
-    [accounts, query],
+  useEffect(() => {
+    void (async () => {
+      await refreshActiveTab();
+      setLoading(false);
+    })();
+  }, [refreshActiveTab]);
+
+  // The side panel stays open across tab switches, unlike the popup which
+  // is freshly mounted every time, so it needs to follow the active tab.
+  useEffect(() => {
+    if (variant !== "sidepanel") return;
+
+    function handleTabChange(): void {
+      setView("list");
+      setRenaming(undefined);
+      setViewingAccountId(undefined);
+      setQuery("");
+      setError(undefined);
+      void refreshActiveTab();
+    }
+
+    function handleTabUpdated(
+      _tabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab,
+    ): void {
+      if (changeInfo.url && tab.active) {
+        handleTabChange();
+      }
+    }
+
+    chrome.tabs.onActivated.addListener(handleTabChange);
+    chrome.tabs.onUpdated.addListener(handleTabUpdated);
+    chrome.windows.onFocusChanged.addListener(handleTabChange);
+
+    return () => {
+      chrome.tabs.onActivated.removeListener(handleTabChange);
+      chrome.tabs.onUpdated.removeListener(handleTabUpdated);
+      chrome.windows.onFocusChanged.removeListener(handleTabChange);
+    };
+  }, [variant, refreshActiveTab]);
+
+  useEffect(() => {
+    if (variant === "popup" && !loading && accounts.length > 0) {
+      searchInputRef.current?.focus();
+    }
+  }, [variant, loading, accounts.length]);
+
+  const sortedAccounts = useMemo(
+    () => sortAccounts(accounts, effectiveSortOrder),
+    [accounts, effectiveSortOrder],
   );
+
+  const filteredAccounts = useMemo(
+    () => filterAccountsByQuery(sortedAccounts, query),
+    [sortedAccounts, query],
+  );
+
+  const dragEnabled = query.trim().length === 0;
 
   const viewingAccount =
     view === "raw"
@@ -98,7 +181,6 @@ export function App(): JSX.Element {
         MESSAGE_TYPE.ACCOUNT_SWITCH,
         { accountId: account.id, origin: account.origin },
       );
-      setLastSwitchedId(account.id);
       setAccounts((prev) =>
         prev.map((a) =>
           a.id === account.id ? { ...a, lastUsed: Date.now() } : a,
@@ -175,7 +257,7 @@ export function App(): JSX.Element {
     setError(undefined);
     try {
       await sendMessage<undefined, void>(MESSAGE_TYPE.SESSION_CLEAR, undefined);
-      setLastSwitchedId(undefined);
+      await clearActiveAccountId();
     } catch (err) {
       setError({
         message: getErrorMessage(err, "Failed to log out of this site."),
@@ -193,7 +275,6 @@ export function App(): JSX.Element {
         { accountId: account.id, origin: account.origin },
       );
       setAccounts((prev) => prev.filter((a) => a.id !== account.id));
-      if (lastSwitchedId === account.id) setLastSwitchedId(undefined);
     } catch (err) {
       setError({
         message: getErrorMessage(err, `Failed to delete "${account.name}".`),
@@ -201,9 +282,34 @@ export function App(): JSX.Element {
     }
   }
 
+  async function handleOpenSidePanel(): Promise<void> {
+    const currentWindow = await chrome.windows.getCurrent();
+    if (currentWindow.id === undefined) return;
+    await chrome.sidePanel.open({ windowId: currentWindow.id });
+    window.close();
+  }
+
+  async function handleReorder(targetId: string): Promise<void> {
+    if (!origin || !draggedId || draggedId === targetId) return;
+
+    const currentIds = sortedAccounts.map((a) => a.id);
+    const nextIds = reorderIds(currentIds, draggedId, targetId);
+    if (nextIds === currentIds) return;
+
+    if (effectiveSortOrder !== SORT_ORDER.CUSTOM) {
+      void setSortOrder(SORT_ORDER.CUSTOM);
+    }
+
+    const reordered = await sendMessage<ReorderPayload, SavedAccount[]>(
+      MESSAGE_TYPE.ACCOUNT_REORDER,
+      { origin, orderedIds: nextIds },
+    );
+    setAccounts(reordered);
+  }
+
   if (loading) {
     return (
-      <main className="popup">
+      <main className={rootClassName}>
         <div className="popup__loading">Loading…</div>
       </main>
     );
@@ -211,7 +317,7 @@ export function App(): JSX.Element {
 
   if (!origin || isUnsupportedOrigin(origin ?? "")) {
     return (
-      <main className="popup">
+      <main className={rootClassName}>
         <div className="popup__empty">
           <p>Switchboard doesn't work on this page.</p>
           <p className="popup__hint">Navigate to a website to manage accounts.</p>
@@ -224,13 +330,23 @@ export function App(): JSX.Element {
   const existingNames = accounts.map((a) => a.name);
 
   return (
-    <main className="popup">
+    <main className={rootClassName}>
       <header className="popup__header">
         <div className="popup__site">
           <span className="popup__site-name">{hostname}</span>
         </div>
         {view === "list" && (
           <div className="popup__header-actions">
+            {variant === "popup" && (
+              <button
+                className="btn btn--ghost btn--sm"
+                onClick={() => void handleOpenSidePanel()}
+                title="Open in side panel"
+                aria-label="Open in side panel"
+              >
+                ⇥
+              </button>
+            )}
             <button
               className="btn btn--ghost btn--sm"
               onClick={() => void handleLogout()}
@@ -299,6 +415,7 @@ export function App(): JSX.Element {
             <>
               <div className="popup__search">
                 <input
+                  ref={searchInputRef}
                   className="input"
                   type="text"
                   placeholder="Search accounts…"
@@ -306,6 +423,18 @@ export function App(): JSX.Element {
                   onChange={(e) => setQuery(e.target.value)}
                   aria-label="Search accounts"
                 />
+                <select
+                  className="popup__sort"
+                  value={effectiveSortOrder}
+                  onChange={(e) =>
+                    void setSortOrder(e.target.value as SortOrder)
+                  }
+                  aria-label="Sort accounts by"
+                >
+                  <option value={SORT_ORDER.CUSTOM}>Custom order</option>
+                  <option value={SORT_ORDER.CREATED}>Recently created</option>
+                  <option value={SORT_ORDER.USED}>Recently used</option>
+                </select>
               </div>
 
               {filteredAccounts.length === 0 ? (
@@ -330,14 +459,50 @@ export function App(): JSX.Element {
                       );
                     }
 
+                    const itemClasses = [
+                      "account-list__item",
+                      switching === account.id &&
+                        "account-list__item--switching",
+                      draggedId === account.id && "account-list__item--dragging",
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
+
                     return (
                       <li
                         key={account.id}
-                        className={`account-list__item${switching === account.id ? " account-list__item--switching" : ""}`}
+                        className={itemClasses}
+                        onDragOver={(e) => {
+                          if (!draggedId) return;
+                          e.preventDefault();
+                          setDragOverId(account.id);
+                        }}
+                        onDragLeave={() =>
+                          setDragOverId((current) =>
+                            current === account.id ? undefined : current,
+                          )
+                        }
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setDragOverId(undefined);
+                          void handleReorder(account.id);
+                        }}
                       >
                         <AccountItem
                           account={account}
-                          isActive={lastSwitchedId === account.id}
+                          isActive={activeAccountId === account.id}
+                          isDropTarget={
+                            dragOverId === account.id &&
+                            draggedId !== account.id
+                          }
+                          dragHandleProps={{
+                            draggable: dragEnabled,
+                            onDragStart: () => setDraggedId(account.id),
+                            onDragEnd: () => {
+                              setDraggedId(undefined);
+                              setDragOverId(undefined);
+                            },
+                          }}
                           onSwitch={() => void handleSwitch(account)}
                           onRename={() =>
                             setRenaming({ accountId: account.id })

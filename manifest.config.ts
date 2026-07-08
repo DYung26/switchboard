@@ -22,6 +22,9 @@ export default defineManifest({
       128: "src/assets/icons/icon-128.png",
     },
   },
+  side_panel: {
+    default_path: "src/sidepanel/index.html",
+  },
   options_page: "src/options/index.html",
   background: {
     service_worker: "src/background/index.ts",
@@ -34,6 +37,6 @@ export default defineManifest({
       run_at: "document_idle",
     },
   ],
-  permissions: ["storage", "cookies", "scripting"],
+  permissions: ["storage", "cookies", "scripting", "sidePanel"],
   host_permissions: ["<all_urls>"],
 });

@@ -20,6 +20,7 @@ function buildAccount(name: string): SavedAccount {
         cacheStorage: [],
       },
     },
+    position: 0,
     createdAt: 0,
     updatedAt: 0,
     lastUsed: undefined,
