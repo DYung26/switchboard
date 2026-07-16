@@ -22,6 +22,17 @@ function byPosition(a: SavedAccount, b: SavedAccount): number {
   return a.position - b.position;
 }
 
+// Chrome reports storage-quota failures as a plain Error whose message
+// mentions "QUOTA_BYTES" (chrome.storage.local) or "quota exceeded"
+// (broader browser storage errors) - there's no dedicated error type to
+// catch, so we match on message text to give these a clearer, actionable
+// message instead of the generic storage-failure one.
+const QUOTA_EXCEEDED_PATTERN = /quota.?bytes|quota exceeded/i;
+
+function isQuotaExceededError(error: unknown): boolean {
+  return error instanceof Error && QUOTA_EXCEEDED_PATTERN.test(error.message);
+}
+
 export function createAccountRepository(
   storage: StorageService,
 ): AccountRepository {
@@ -46,6 +57,13 @@ export function createAccountRepository(
     try {
       await storage.set(accountStorageKey(origin), accounts);
     } catch (error) {
+      if (isQuotaExceededError(error)) {
+        throw new AccountError(
+          ACCOUNT_ERROR_CODE.QUOTA_EXCEEDED,
+          `Ran out of browser storage while saving this account for "${origin}". Try removing an unused account and saving again.`,
+          error,
+        );
+      }
       throw new AccountError(
         ACCOUNT_ERROR_CODE.STORAGE_FAILURE,
         `Failed to save accounts for "${origin}".`,

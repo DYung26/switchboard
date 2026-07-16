@@ -8,12 +8,28 @@ import type {
 import { createLogger } from "@/utils/logger";
 import { withTimeout } from "@/utils/with-timeout";
 import { MESSAGE_RESPONSE_TIMEOUT_MS } from "@/constants/app";
+import { MESSAGE_TYPE } from "@/constants/messages";
+
+// Only these are reachable from an externally_connectable page (Maestro's
+// browser automation) - everything else stays internal-only, since a
+// compromised or malicious page on an allowed origin should be able to at
+// most list/switch accounts for that origin, not rename, delete, or replace
+// them.
+const EXTERNALLY_ALLOWED_TYPES = new Set<string>([
+  MESSAGE_TYPE.ACCOUNT_LIST,
+  MESSAGE_TYPE.ACCOUNT_SWITCH,
+]);
 
 export function createChromeMessageBus(context: RuntimeContext): MessageBus {
   const logger = createLogger(context);
   const handlers = new Map<string, Set<MessageHandler>>();
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  function dispatch(
+    source: "internal" | "external",
+    message: unknown,
+    sender: chrome.runtime.MessageSender,
+    sendResponse: (response?: unknown) => void,
+  ): boolean {
     const envelope = message as MessageEnvelope;
     const typeHandlers = handlers.get(envelope.type);
 
@@ -25,12 +41,32 @@ export function createChromeMessageBus(context: RuntimeContext): MessageBus {
     Promise.resolve(handler!(envelope.payload, sender))
       .then(sendResponse)
       .catch((error: unknown) => {
-        logger.error(`Handler for "${envelope.type}" failed`, error);
+        const label = source === "external" ? "External handler" : "Handler";
+        logger.error(`${label} for "${envelope.type}" failed`, error);
         sendResponse({ error: toErrorMessage(error) });
       });
 
     return true;
-  });
+  }
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) =>
+    dispatch("internal", message, sender, sendResponse),
+  );
+
+  // `onMessageExternal` doesn't exist in a content script's `chrome.runtime`
+  // - only the background service worker needs to receive Maestro's
+  // external messages, so this is gated to that context rather than added
+  // unconditionally.
+  if (context === "background") {
+    chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+      const envelope = message as MessageEnvelope;
+      if (!EXTERNALLY_ALLOWED_TYPES.has(envelope.type)) {
+        sendResponse({ error: `"${envelope.type}" is not available to external callers.` });
+        return false;
+      }
+      return dispatch("external", message, sender, sendResponse);
+    });
+  }
 
   return {
     async send<TPayload, TResponse>(

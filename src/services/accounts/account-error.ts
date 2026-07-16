@@ -3,6 +3,7 @@ export const ACCOUNT_ERROR_CODE = {
   INVALID_NAME: "invalid_name",
   DUPLICATE_NAME: "duplicate_name",
   STORAGE_FAILURE: "storage_failure",
+  QUOTA_EXCEEDED: "quota_exceeded",
 } as const;
 
 export type AccountErrorCode =

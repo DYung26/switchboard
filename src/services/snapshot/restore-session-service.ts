@@ -86,19 +86,31 @@ export function createRestoreSessionService(
         }
       }
 
-      if (failures.length > 0) {
+      if (failures.length === mechanisms.length) {
         throw new SnapshotError(
           SNAPSHOT_ERROR_CODE.COLLECTOR_FAILURE,
-          `Failed to restore ${failures.length} of ${mechanisms.length} storage mechanisms for ${origin}: ${describeMechanismFailures(failures)}`,
+          `Failed to restore any of ${mechanisms.length} storage mechanisms for ${origin}: ${describeMechanismFailures(failures)}`,
           failures,
         );
       }
 
+      // A single mechanism failing (most commonly IndexedDB blocked by a
+      // connection the live page's own scripts still hold open) must not
+      // withhold the reload the caller is waiting on - every mechanism that
+      // did succeed already overwrote this tab's storage, so skipping the
+      // reload here would leave the browser in a half-switched state with
+      // no visible effect at all rather than a partially-applied one.
       await chrome.tabs.update(tabId, { url: origin });
 
       if (clearFailures.length > 0) {
         logger.warn(
           `Restored ${origin} despite an incomplete pre-restore clear - stale data may remain for: ${describeMechanismFailures(clearFailures)}`,
+        );
+      }
+
+      if (failures.length > 0) {
+        logger.warn(
+          `Restored ${origin} despite ${failures.length} of ${mechanisms.length} storage mechanisms failing: ${describeMechanismFailures(failures)}`,
         );
       }
     },

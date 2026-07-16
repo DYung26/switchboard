@@ -124,11 +124,28 @@ describe("createRestoreSessionService", () => {
     expect(chrome.tabs.update).not.toHaveBeenCalled();
   });
 
-  it("does not reload the tab if a collector fails to restore", async () => {
+  it("still reloads the tab if only some collectors fail to restore", async () => {
     const registry = buildFakeRegistry();
     registry[STORAGE_MECHANISM.COOKIES].restore = vi.fn(async () => {
       throw new Error("boom");
     });
+    const clearService = createClearSessionService(registry);
+    const restoreService = createRestoreSessionService(registry, clearService);
+
+    await restoreService.restoreSession(buildSnapshot());
+
+    expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
+      url: "https://example.com",
+    });
+  });
+
+  it("does not reload the tab if every collector fails to restore", async () => {
+    const registry = buildFakeRegistry();
+    for (const mechanism of Object.values(STORAGE_MECHANISM)) {
+      registry[mechanism].restore = vi.fn(async () => {
+        throw new Error("boom");
+      });
+    }
     const clearService = createClearSessionService(registry);
     const restoreService = createRestoreSessionService(registry, clearService);
 
