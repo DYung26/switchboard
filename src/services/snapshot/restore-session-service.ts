@@ -100,7 +100,8 @@ export function createRestoreSessionService(
       // did succeed already overwrote this tab's storage, so skipping the
       // reload here would leave the browser in a half-switched state with
       // no visible effect at all rather than a partially-applied one.
-      await chrome.tabs.update(tabId, { url: origin });
+      // await chrome.tabs.update(tabId, { url: origin });
+      await chrome.tabs.reload(tabId);
 
       if (clearFailures.length > 0) {
         logger.warn(
