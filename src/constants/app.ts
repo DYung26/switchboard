@@ -10,7 +10,7 @@ export const STORAGE_AREA = {
 
 export const DEFAULT_STORAGE_AREA = STORAGE_AREA.LOCAL;
 
-export const MESSAGE_RESPONSE_TIMEOUT_MS = 10_000;
+export const MESSAGE_RESPONSE_TIMEOUT_MS = 15_000;
 
 export const ACCOUNTS_KEY_PREFIX = "accounts:";
 
