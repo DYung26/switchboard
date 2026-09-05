@@ -14,6 +14,8 @@ import { sortAccounts } from "@/utils/sort-accounts";
 import { reorderIds } from "@/utils/reorder-ids";
 import { getErrorMessage } from "@/utils/get-error-message";
 import { AccountItem } from "./components/AccountItem";
+import { ThemeSelector } from "./components/ThemeSelector";
+import { useTheme } from "@/hooks/use-theme";
 import { SaveAccountForm } from "./components/SaveAccountForm";
 import { RenameAccountForm } from "./components/RenameAccountForm";
 import { RawAccountView } from "./components/RawAccountView";
@@ -57,6 +59,7 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
   const rootClassName =
     variant === "sidepanel" ? "popup popup--sidepanel" : "popup";
   const [origin, setOrigin] = useState<string | undefined>(undefined);
+  const [theme, setTheme] = useTheme();
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [view, setView] = useState<View>("list");
   const [renaming, setRenaming] = useState<RenameState | undefined>(undefined);
@@ -319,7 +322,7 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
     return (
       <main className={rootClassName}>
         <div className="popup__empty">
-          <p>Switchboard doesn't work on this page.</p>
+          <p>Switchboard doesn&apos;t work on this page.</p>
           <p className="popup__hint">Navigate to a website to manage accounts.</p>
         </div>
       </main>
@@ -337,6 +340,7 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
         </div>
         {view === "list" && (
           <div className="popup__header-actions">
+            <ThemeSelector value={theme} onChange={(next) => void setTheme(next)} />
             {variant === "popup" && (
               <button
                 className="btn btn--ghost btn--sm"
