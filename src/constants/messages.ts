@@ -22,6 +22,15 @@ export const MESSAGE_TYPE = {
   ACCOUNT_DUPLICATE: "switchboard/account/duplicate",
   ACCOUNT_DELETE: "switchboard/account/delete",
   ACCOUNT_REORDER: "switchboard/account/reorder",
+  NETWORK_CAPTURE_START: "switchboard/network/capture/start",
+  NETWORK_CAPTURE_STOP: "switchboard/network/capture/stop",
+  NETWORK_CAPTURE_LIST: "switchboard/network/capture/list",
+  NETWORK_SAVED_LIST: "switchboard/network/saved/list",
+  NETWORK_SAVED_GET: "switchboard/network/saved/get",
+  NETWORK_SAVED_SAVE: "switchboard/network/saved/save",
+  NETWORK_SAVED_DELETE: "switchboard/network/saved/delete",
+  NETWORK_SAVED_UPDATE: "switchboard/network/saved/update",
+  NETWORK_REPLAY: "switchboard/network/replay",
 } as const;
 
 export type MessageType = (typeof MESSAGE_TYPE)[keyof typeof MESSAGE_TYPE];

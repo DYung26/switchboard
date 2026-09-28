@@ -82,6 +82,7 @@ beforeEach(() => {
         { id: 7, url: "https://example.com/dashboard" },
       ]),
       update: vi.fn(async () => undefined),
+      reload: vi.fn(async () => undefined),
     },
   });
 });
@@ -105,9 +106,7 @@ describe("createRestoreSessionService", () => {
         expect.anything(),
       );
     }
-    expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-      url: "https://example.com",
-    });
+    expect(chrome.tabs.reload).toHaveBeenCalledWith(7);
   });
 
   it("rejects a snapshot for a different origin without touching collectors", async () => {
@@ -134,9 +133,7 @@ describe("createRestoreSessionService", () => {
 
     await restoreService.restoreSession(buildSnapshot());
 
-    expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-      url: "https://example.com",
-    });
+    expect(chrome.tabs.reload).toHaveBeenCalledWith(7);
   });
 
   it("does not reload the tab if every collector fails to restore", async () => {
@@ -180,9 +177,7 @@ describe("createRestoreSessionService", () => {
         expect.anything(),
       );
     }
-    expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-      url: "https://example.com",
-    });
+    expect(chrome.tabs.reload).toHaveBeenCalledWith(7);
   });
 
   it("migrates a legacy v1 snapshot before restoring, defaulting new mechanisms to empty", async () => {
@@ -200,8 +195,6 @@ describe("createRestoreSessionService", () => {
     expect(
       registry[STORAGE_MECHANISM.CACHE_STORAGE].restore,
     ).toHaveBeenCalledWith("https://example.com", 7, []);
-    expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-      url: "https://example.com",
-    });
+    expect(chrome.tabs.reload).toHaveBeenCalledWith(7);
   });
 });

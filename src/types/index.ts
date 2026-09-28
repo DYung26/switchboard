@@ -5,3 +5,4 @@ export * from "./codec";
 export * from "./snapshot";
 export * from "./account";
 export * from "./sort";
+export * from "./network";

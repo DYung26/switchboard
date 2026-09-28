@@ -47,6 +47,21 @@ per-website. Click the extension icon while on a site to get started.
 > try to switch back to it. Switchboard's Log Out only clears what's stored
 > in your browser, so every saved account stays switchable.
 
+## Network replay
+
+Switchboard can capture a browser request, save its reusable definition, and
+replay that definition in the authenticated browser context. Saved requests
+are provider-agnostic: URL, method, headers, and optional body are stored
+without assuming a particular API.
+
+The replay message supports an active-browser target and string replacements,
+for example: `{ id: "saved-request-id", target: "active", replacements: {
+"OLD_ID": "NEW_ID" } }`.
+
+The background worker also exposes this network replay capability to the
+EchoProfile browser-control bridge. EchoProfile owns the Playwright browser;
+Switchboard remains responsible for the actual browser-authenticated request.
+
 ## Stack
 
 - **Vite** + **@crxjs/vite-plugin** — bundles the extension and keeps the

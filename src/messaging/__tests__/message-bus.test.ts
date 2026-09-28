@@ -5,6 +5,7 @@ function stubChrome(overrides: Record<string, unknown> = {}) {
   vi.stubGlobal("chrome", {
     runtime: {
       onMessage: { addListener: vi.fn() },
+      onMessageExternal: { addListener: vi.fn() },
       getManifest: vi.fn(() => ({
         content_scripts: [{ js: ["src/content/index.ts"] }],
       })),

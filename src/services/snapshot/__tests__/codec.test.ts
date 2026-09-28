@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { Blob as NodeBlob } from "node:buffer";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeValue, encodeValue } from "../codec";
+
+beforeEach(() => {
+  vi.stubGlobal("Blob", NodeBlob);
+});
 
 async function roundTrip(value: unknown): Promise<unknown> {
   return decodeValue(await encodeValue(value));

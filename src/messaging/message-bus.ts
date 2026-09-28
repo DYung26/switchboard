@@ -10,11 +10,10 @@ import { withTimeout } from "@/utils/with-timeout";
 import { MESSAGE_RESPONSE_TIMEOUT_MS } from "@/constants/app";
 import { MESSAGE_TYPE } from "@/constants/messages";
 
-// Only these are reachable from an externally_connectable page (Maestro's
-// browser automation) - everything else stays internal-only, since a
-// compromised or malicious page on an allowed origin should be able to at
-// most list/switch accounts for that origin, not rename, delete, or replace
-// them.
+// Only account switching is reachable from externally_connectable pages.
+// Network replay remains extension-internal because it can issue authenticated
+// requests using saved browser credentials. EchoProfile uses an extension page
+// and the internal runtime message bus for network replay.
 const EXTERNALLY_ALLOWED_TYPES = new Set<string>([
   MESSAGE_TYPE.ACCOUNT_LIST,
   MESSAGE_TYPE.ACCOUNT_SWITCH,

@@ -23,6 +23,7 @@ function stubChrome(tab: Partial<chrome.tabs.Tab> | undefined) {
     tabs: {
       query: vi.fn(async () => (tab ? [tab] : [])),
       update: vi.fn(async () => undefined),
+      reload: vi.fn(async () => undefined),
     },
   });
 }
@@ -108,9 +109,7 @@ describe("createSessionEngine", () => {
       const engine = createSessionEngine(bus);
       await engine.restoreSession(buildSnapshot());
 
-      expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-        url: "https://example.com",
-      });
+      expect(chrome.tabs.reload).toHaveBeenCalledWith(7);
     });
 
     it("sends web storage restore messages to the active tab via the bus", async () => {
@@ -149,7 +148,7 @@ describe("createSessionEngine", () => {
       await engine.clearCurrentSession();
 
       expect(chrome.cookies.getAll).toHaveBeenCalledWith({
-        url: "https://example.com",
+        domain: "example.com",
       });
     });
 

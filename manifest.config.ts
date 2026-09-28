@@ -37,12 +37,25 @@ export default defineManifest({
       run_at: "document_idle",
     },
   ],
-  permissions: ["storage", "unlimitedStorage", "cookies", "scripting", "sidePanel"],
-  host_permissions: ["<all_urls>"],
+  permissions: [
+    "storage",
+    "unlimitedStorage",
+    "cookies",
+    "scripting",
+    "sidePanel",
+    "debugger",
+  ],
+  host_permissions: ["<all_urls>", "http://127.0.0.1/*"],
   // Lets a page on one of these origins message this extension directly via
   // chrome.runtime.sendMessage(extensionId, ...) - used by Maestro's browser
   // automation to trigger account restores instead of scripting the popup UI.
   externally_connectable: {
-    matches: ["https://chatgpt.com/*", "https://chat.openai.com/*", "https://claude.ai/*"],
+    matches: [
+      "https://chatgpt.com/*",
+      "https://chat.openai.com/*",
+      "https://claude.ai/*",
+      "http://localhost/*",
+      "http://127.0.0.1/*",
+    ],
   },
 });

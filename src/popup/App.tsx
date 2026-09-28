@@ -19,8 +19,9 @@ import { useTheme } from "@/hooks/use-theme";
 import { SaveAccountForm } from "./components/SaveAccountForm";
 import { RenameAccountForm } from "./components/RenameAccountForm";
 import { RawAccountView } from "./components/RawAccountView";
+import { NetworkView } from "./components/NetworkView";
 
-type View = "list" | "save" | "raw";
+type View = "list" | "save" | "raw" | "network";
 
 interface RenameState {
   accountId: string;
@@ -73,6 +74,7 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
   const [query, setQuery] = useState("");
   const [draggedId, setDraggedId] = useState<string | undefined>(undefined);
   const [dragOverId, setDragOverId] = useState<string | undefined>(undefined);
+  const [activeTabId, setActiveTabId] = useState<number | undefined>(undefined);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -104,6 +106,8 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
 
   useEffect(() => {
     void (async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      setActiveTabId(tab?.id);
       await refreshActiveTab();
       setLoading(false);
     })();
@@ -114,8 +118,11 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
   useEffect(() => {
     if (variant !== "sidepanel") return;
 
-    function handleTabChange(): void {
-      setView("list");
+    async function handleTabChange(): Promise<void> {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      setActiveTabId(tab?.id);
+      // Keep Network open while the user navigates. Capture belongs to
+      // the background service, not to this React view's lifecycle.
       setRenaming(undefined);
       setViewingAccountId(undefined);
       setQuery("");
@@ -129,18 +136,25 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
       tab: chrome.tabs.Tab,
     ): void {
       if (changeInfo.url && tab.active) {
-        handleTabChange();
+        void handleTabChange();
       }
     }
 
-    chrome.tabs.onActivated.addListener(handleTabChange);
+    const handleActivated = (): void => {
+      void handleTabChange();
+    };
+    const handleFocusChanged = (): void => {
+      void handleTabChange();
+    };
+
+    chrome.tabs.onActivated.addListener(handleActivated);
     chrome.tabs.onUpdated.addListener(handleTabUpdated);
-    chrome.windows.onFocusChanged.addListener(handleTabChange);
+    chrome.windows.onFocusChanged.addListener(handleFocusChanged);
 
     return () => {
-      chrome.tabs.onActivated.removeListener(handleTabChange);
+      chrome.tabs.onActivated.removeListener(handleActivated);
       chrome.tabs.onUpdated.removeListener(handleTabUpdated);
-      chrome.windows.onFocusChanged.removeListener(handleTabChange);
+      chrome.windows.onFocusChanged.removeListener(handleFocusChanged);
     };
   }, [variant, refreshActiveTab]);
 
@@ -360,6 +374,13 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
               {loggingOut ? "Logging out…" : "Log Out"}
             </button>
             <button
+              className="btn btn--ghost btn--sm"
+              onClick={() => setView("network")}
+              disabled={activeTabId === undefined}
+            >
+              Network
+            </button>
+            <button
               className="btn btn--primary btn--sm"
               onClick={() => {
                 setView("save");
@@ -371,6 +392,10 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
           </div>
         )}
       </header>
+
+      {view === "network" && activeTabId !== undefined && (
+        <NetworkView tabId={activeTabId} onBack={() => setView("list")} />
+      )}
 
       {error && (
         <div className="popup__error" onClick={() => setError(undefined)}>
