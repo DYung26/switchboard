@@ -1,0 +1,443 @@
+import type { BackgroundService } from "../background-service";
+import type {
+  MessageBus,
+  NetworkReplayResult,
+  NetworkRequest,
+  SavedNetworkRequest,
+} from "@/types";
+import { MESSAGE_TYPE } from "@/constants/messages";
+import { createChromeStorageService } from "@/storage";
+
+const SAVED_REQUESTS_KEY = "network:saved-requests";
+const DEBUGGER_VERSION = "1.3";
+
+interface RequestWillBeSent {
+  requestId: string;
+  request: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    postData?: string;
+  };
+}
+
+interface ResponseReceived {
+  requestId: string;
+  response: {
+    status: number;
+    headers: Record<string, string>;
+    mimeType?: string;
+  };
+}
+
+interface LoadingFinished {
+  requestId: string;
+}
+
+export function createNetworkService(bus: MessageBus): BackgroundService {
+  const captured = new Map<string, NetworkRequest>();
+  const storage = createChromeStorageService();
+  let attachedTabId: number | undefined;
+  let lastWebTabId: number | undefined;
+
+  function debuggee(tabId: number): chrome.debugger.Debuggee {
+    return { tabId };
+  }
+
+  async function detach(): Promise<void> {
+    if (attachedTabId === undefined) return;
+    const tabId = attachedTabId;
+    attachedTabId = undefined;
+    try {
+      await chrome.debugger.detach(debuggee(tabId));
+    } catch {
+      // The tab may have been closed or the debugger may already be detached.
+    }
+  }
+
+  async function startCapture(tabId: number): Promise<void> {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab.url ?? "";
+    if (/^(chrome|edge|about|devtools):/i.test(url)) {
+      throw new Error(`Cannot capture browser-internal URL: ${url}`);
+    }
+    if (!/^https?:/i.test(url)) {
+      throw new Error(`Cannot capture unsupported URL: ${url || "unknown"}`);
+    }
+
+    if (attachedTabId !== undefined && attachedTabId !== tabId) {
+      await detach();
+    }
+    if (attachedTabId === tabId) {
+      captured.clear();
+      return;
+    }
+
+    await chrome.debugger.attach(debuggee(tabId), DEBUGGER_VERSION);
+    attachedTabId = tabId;
+    captured.clear();
+    await chrome.debugger.sendCommand(debuggee(tabId), "Network.enable");
+  }
+
+  async function stopCapture(): Promise<void> {
+    await detach();
+  }
+
+  async function listCaptured(): Promise<NetworkRequest[]> {
+    return [...captured.values()].sort((a, b) => b.capturedAt - a.capturedAt);
+  }
+
+  async function listSaved(): Promise<SavedNetworkRequest[]> {
+    return (await storage.get<SavedNetworkRequest[]>(SAVED_REQUESTS_KEY)) ?? [];
+  }
+
+  async function saveRequest(
+    request: NetworkRequest,
+    name: string,
+  ): Promise<SavedNetworkRequest> {
+    const now = Date.now();
+    const saved: SavedNetworkRequest = {
+      id: crypto.randomUUID(),
+      name: name.trim() || new URL(request.url).pathname || request.url,
+      url: request.url,
+      method: request.method,
+      requestHeaders: request.requestHeaders,
+      createdAt: now,
+      updatedAt: now,
+      ...(request.requestBody !== undefined
+        ? { requestBody: request.requestBody }
+        : {}),
+    };
+    const existing = await listSaved();
+    await storage.set(SAVED_REQUESTS_KEY, [saved, ...existing]);
+    return saved;
+  }
+
+  async function deleteSaved(id: string): Promise<void> {
+    const existing = await listSaved();
+    await storage.set(
+      SAVED_REQUESTS_KEY,
+      existing.filter((request) => request.id !== id),
+    );
+  }
+
+  async function updateSaved(
+    id: string,
+    patch: Pick<SavedNetworkRequest, "name" | "url" | "method" | "requestHeaders" | "requestBody">,
+  ): Promise<SavedNetworkRequest> {
+    const existing = await listSaved();
+    const index = existing.findIndex((request) => request.id === id);
+    if (index < 0) throw new Error('Saved request "' + id + '" not found.');
+
+    const current = existing[index]!;
+    const updated: SavedNetworkRequest = {
+      ...current,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    existing[index] = updated;
+    await storage.set(SAVED_REQUESTS_KEY, existing);
+    return updated;
+  }
+
+  async function replay(
+    request: SavedNetworkRequest,
+    tabId: number,
+    sets: Array<{ path: string; value: string }> = [],
+    replacements: Record<string, string> = {},
+  ): Promise<NetworkReplayResult> {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: async (input) => {
+        const getPath = (root: unknown, path: string): { parent: any; key: string } => {
+          const parts = path.split(".").filter(Boolean);
+          if (parts.length === 0) throw new Error("Replacement path cannot be empty.");
+          let parent: any = root;
+          for (const part of parts.slice(0, -1)) {
+            if (parent === null || typeof parent !== "object" || !(part in parent)) {
+              throw new Error("Replacement path not found: " + path);
+            }
+            parent = parent[part];
+          }
+          return { parent, key: parts[parts.length - 1]! };
+        };
+
+        const setJsonPath = (root: unknown, path: string, value: string): void => {
+          const { parent, key } = getPath(root, path);
+          if (parent === null || typeof parent !== "object" || !(key in parent)) {
+            throw new Error("Replacement path not found: " + path);
+          }
+          parent[key] = value;
+        };
+
+        const headers = { ...input.headers };
+        let body = input.body;
+
+        for (const set of input.sets) {
+          if (set.path === "url.pathname") {
+            const parsed = new URL(input.url);
+            parsed.pathname = set.value;
+            input.url = parsed.toString();
+            continue;
+          }
+          if (set.path.startsWith("url.path.")) {
+            const index = Number(set.path.slice("url.path.".length));
+            if (!Number.isInteger(index) || index < 0) {
+              throw new Error("Invalid URL path index: " + set.path);
+            }
+            const parsed = new URL(input.url);
+            const segments = parsed.pathname.split("/");
+            if (index >= segments.length) {
+              throw new Error("URL path index not found: " + set.path);
+            }
+            segments[index] = set.value;
+            parsed.pathname = segments.join("/");
+            input.url = parsed.toString();
+            continue;
+          }
+          if (set.path.startsWith("url.query.")) {
+            const key = set.path.slice("url.query.".length);
+            const parsed = new URL(input.url);
+            if (!parsed.searchParams.has(key)) throw new Error("URL query parameter not found: " + key);
+            parsed.searchParams.set(key, set.value);
+            input.url = parsed.toString();
+            continue;
+          }
+          if (set.path.startsWith("headers.")) {
+            const requested = set.path.slice("headers.".length);
+            const actual = Object.keys(headers).find(
+              (name) => name.toLowerCase() === requested.toLowerCase(),
+            );
+            if (!actual) throw new Error("Header path not found: " + requested);
+            headers[actual] = set.value;
+            continue;
+          }
+          if (!set.path.startsWith("body.")) {
+            throw new Error("Unsupported replacement path: " + set.path);
+          }
+          if (body === undefined) throw new Error("Request has no body: " + set.path);
+          let parsed: any;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            throw new Error("Request body is not JSON; cannot use path: " + set.path);
+          }
+          setJsonPath(parsed, set.path.slice("body.".length), set.value);
+          body = JSON.stringify(parsed);
+        }
+
+        const rawReplace = (value: string): string =>
+          Object.entries(input.replacements).reduce(
+            (current, [from, to]) => current.split(from).join(to),
+            value,
+          );
+
+        const finalUrl = rawReplace(input.url);
+        const finalHeaders = Object.fromEntries(
+          Object.entries(headers).map(([name, value]) => [name, rawReplace(value)]),
+        );
+        const finalBody = body === undefined ? undefined : rawReplace(body);
+        const requestHeaders = new Headers();
+        for (const [name, value] of Object.entries(finalHeaders)) {
+          try { requestHeaders.set(name, value); } catch { /* browser-controlled */ }
+        }
+
+        const response = await fetch(finalUrl, {
+          method: input.method,
+          headers: requestHeaders,
+          credentials: "include",
+          ...(finalBody !== undefined ? { body: finalBody } : {}),
+        });
+        return {
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+          body: await response.text(),
+        };
+      },
+      args: [{
+        url: request.url,
+        method: request.method,
+        headers: request.requestHeaders,
+        body: request.requestBody,
+        sets,
+        replacements,
+      }],
+    });
+    const result = results[0]?.result as NetworkReplayResult | undefined;
+    if (!result) throw new Error("Replay returned no response.");
+    return result;
+  }
+
+  return {
+    name: "network",
+
+    init(): void {
+      void chrome.tabs
+        .query({ active: true, lastFocusedWindow: true })
+        .then((tabs) => {
+          const tab = tabs[0];
+          if (tab && tab.id !== undefined && /^https?:/i.test(tab.url ?? "")) {
+            lastWebTabId = tab.id;
+          }
+        });
+
+      chrome.tabs.onActivated.addListener(({ tabId }) => {
+        void chrome.tabs.get(tabId).then((tab) => {
+          if (/^https?:/i.test(tab.url ?? "")) {
+            lastWebTabId = tabId;
+          }
+        }).catch(() => undefined);
+      });
+
+      chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+        if (
+          tab.active &&
+          (changeInfo.url !== undefined || tab.url !== undefined) &&
+          /^https?:/i.test(tab.url ?? "")
+        ) {
+          lastWebTabId = tabId;
+        }
+      });
+
+      chrome.debugger.onEvent.addListener((source, method, params) => {
+        if (source.tabId === undefined || source.tabId !== attachedTabId) return;
+
+        if (method === "Network.requestWillBeSent") {
+          const event = params as RequestWillBeSent;
+          captured.set(event.requestId, {
+            id: event.requestId,
+            tabId: source.tabId,
+            url: event.request.url,
+            method: event.request.method,
+            requestHeaders: event.request.headers,
+            capturedAt: Date.now(),
+            ...(event.request.postData !== undefined
+              ? { requestBody: event.request.postData }
+              : {}),
+          });
+          return;
+        }
+
+        if (method === "Network.responseReceived") {
+          const event = params as ResponseReceived;
+          const request = captured.get(event.requestId);
+          if (!request) return;
+          request.status = event.response.status;
+          request.responseHeaders = event.response.headers;
+          if (event.response.mimeType !== undefined) {
+            request.mimeType = event.response.mimeType;
+          }
+          return;
+        }
+
+        if (method === "Network.loadingFinished") {
+          const event = params as LoadingFinished;
+          const request = captured.get(event.requestId);
+          if (!request) return;
+
+          void chrome.debugger
+            .sendCommand(source, "Network.getResponseBody", {
+              requestId: event.requestId,
+            })
+            .then((body) => {
+              const payload = body as {
+                body?: string;
+                base64Encoded?: boolean;
+              };
+              if (payload.body !== undefined) {
+                const responseBody = payload.base64Encoded
+                  ? atob(payload.body)
+                  : payload.body;
+                request.responseBody = responseBody;
+              }
+            })
+            .catch(() => {
+              // Some streaming, cached, or opaque responses have no retrievable body.
+            });
+        }
+      });
+
+      chrome.debugger.onDetach.addListener((source) => {
+        if (source.tabId === attachedTabId) attachedTabId = undefined;
+      });
+
+      bus.on<{ tabId: number }, void>(
+        MESSAGE_TYPE.NETWORK_CAPTURE_START,
+        ({ tabId }) => startCapture(tabId),
+      );
+      bus.on<void, void>(MESSAGE_TYPE.NETWORK_CAPTURE_STOP, () => stopCapture());
+      bus.on<void, NetworkRequest[]>(
+        MESSAGE_TYPE.NETWORK_CAPTURE_LIST,
+        () => listCaptured(),
+      );
+      bus.on<void, SavedNetworkRequest[]>(
+        MESSAGE_TYPE.NETWORK_SAVED_LIST,
+        () => listSaved(),
+      );
+      bus.on<{ id: string }, SavedNetworkRequest>(
+        MESSAGE_TYPE.NETWORK_SAVED_GET,
+        async ({ id }) => {
+          const request = (await listSaved()).find((item) => item.id === id);
+          if (!request) throw new Error('Saved request "' + id + '" not found.');
+          return request;
+        },
+      );
+      bus.on<{ requestId: string; name: string }, SavedNetworkRequest>(
+        MESSAGE_TYPE.NETWORK_SAVED_SAVE,
+        async ({ requestId, name }) => {
+          const request = captured.get(requestId);
+          if (!request) {
+            throw new Error(
+              'Captured request "' + requestId + '" no longer exists.',
+            );
+          }
+          return saveRequest(request, name);
+        },
+      );
+      bus.on<{ id: string }, void>(
+        MESSAGE_TYPE.NETWORK_SAVED_DELETE,
+        ({ id }) => deleteSaved(id),
+      );
+      bus.on<
+        {
+          id: string;
+          name: string;
+          url: string;
+          method: string;
+          requestHeaders: Record<string, string>;
+          requestBody?: string;
+        },
+        SavedNetworkRequest
+      >(MESSAGE_TYPE.NETWORK_SAVED_UPDATE, (payload) =>
+        updateSaved(payload.id, payload),
+      );
+      bus.on<
+        {
+          id: string;
+          tabId?: number;
+          target?: "active";
+          sets?: Array<{ path: string; value: string }>;
+          replacements?: Record<string, string>;
+        },
+        NetworkReplayResult
+      >(MESSAGE_TYPE.NETWORK_REPLAY, async ({ id, tabId, target, sets, replacements }, sender) => {
+        const request = (await listSaved()).find((item) => item.id === id);
+        if (!request) {
+          throw new Error('Saved request "' + id + '" not found.');
+        }
+
+        let targetTabId = tabId ?? sender.tab?.id;
+        if (target === "active" || targetTabId === undefined) {
+          targetTabId = lastWebTabId;
+        }
+
+        if (targetTabId === undefined) {
+          throw new Error("Network replay requires an active browser tab.");
+        }
+
+        return replay(request, targetTabId, sets, replacements);
+      });
+    },
+  };
+}
