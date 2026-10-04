@@ -95,7 +95,8 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
       throw new Error("Network capture target tab ID is invalid.");
     }
 
-    const tab = await chrome.tabs.get(targetTabId);
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((candidate) => candidate.id === targetTabId);
     const url = tab?.url ?? "";
     if (!createdTarget) {
       if (/^(chrome|edge|about|devtools):/i.test(url)) {
