@@ -140,6 +140,24 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
     return updated;
   }
 
+  async function waitForTabLoad(tabId: number): Promise<void> {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === "complete") return;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        reject(new Error("Browser target tab did not finish loading."));
+      }, 15000);
+      const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+        if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+  }
+
   async function fetchUrl(
     url: string,
     method = "GET",
@@ -158,18 +176,11 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
     let targetTabId = targetTab?.id;
     let createdTabId: number | undefined;
     if (targetTabId === undefined) {
-      const created = await chrome.tabs.create({ url, active: false });
+      const created = await chrome.tabs.create({ url: targetOrigin, active: false });
       if (created.id === undefined) throw new Error("Browser fetch could not create a target tab.");
       targetTabId = created.id;
       createdTabId = created.id;
-      await new Promise<void>((resolve, reject) => {
-        const listener = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
-          if (tabId !== createdTabId || changeInfo.status !== "complete") return;
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        };
-        chrome.tabs.onUpdated.addListener(listener);
-      });
+      await waitForTabLoad(createdTabId);
     }
     try {
       const results = await chrome.scripting.executeScript({
@@ -542,20 +553,13 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
 
         let createdTabId: number | undefined;
         if (targetTabId === undefined && url !== undefined) {
-          const created = await chrome.tabs.create({ url, active: false });
+          const created = await chrome.tabs.create({ url: new URL(url).origin, active: false });
           if (created.id === undefined) {
             throw new Error("Network replay could not create a target tab.");
           }
           targetTabId = created.id;
           createdTabId = created.id;
-          await new Promise<void>((resolve) => {
-            const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
-              if (updatedTabId !== createdTabId || changeInfo.status !== "complete") return;
-              chrome.tabs.onUpdated.removeListener(listener);
-              resolve();
-            };
-            chrome.tabs.onUpdated.addListener(listener);
-          });
+          await waitForTabLoad(createdTabId);
         }
 
         if (targetTabId === undefined) {
