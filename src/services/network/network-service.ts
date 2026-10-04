@@ -38,45 +38,138 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
   const captured = new Map<string, NetworkRequest>();
   const storage = createChromeStorageService();
   let attachedTabId: number | undefined;
+  let attachedTargetId: string | undefined;
   let lastWebTabId: number | undefined;
 
-  function debuggee(tabId: number): chrome.debugger.Debuggee {
-    return { tabId };
+  function debuggee(targetId: string): chrome.debugger.Debuggee {
+    return { targetId };
   }
 
   async function detach(): Promise<void> {
     if (attachedTabId === undefined) return;
-    const tabId = attachedTabId;
+    const targetId = attachedTargetId;
     attachedTabId = undefined;
+    attachedTargetId = undefined;
+    if (targetId === undefined) return;
     try {
-      await chrome.debugger.detach(debuggee(tabId));
+      await chrome.debugger.detach(debuggee(targetId));
     } catch {
       // The tab may have been closed or the debugger may already be detached.
     }
   }
 
-  async function startCapture(tabId: number): Promise<void> {
-    const tab = await chrome.tabs.get(tabId);
-    const url = tab.url ?? "";
-    if (/^(chrome|edge|about|devtools):/i.test(url)) {
-      throw new Error(`Cannot capture browser-internal URL: ${url}`);
-    }
-    if (!/^https?:/i.test(url)) {
-      throw new Error(`Cannot capture unsupported URL: ${url || "unknown"}`);
+  async function startCapture(
+    tabId?: number,
+    options: { url?: string; reload?: boolean } = {},
+  ): Promise<void> {
+    let targetTabId = tabId;
+    let createdTarget = false;
+
+    if (options.url !== undefined) {
+      await chrome.tabs.create({ url: "about:blank", active: true });
+      const [created] = await chrome.tabs.query({
+        active: true,
+        lastFocusedWindow: true,
+      });
+      if (created?.id === undefined) {
+        throw new Error("Network capture could not identify the target tab.");
+      }
+      targetTabId = created.id;
+      createdTarget = true;
+    } else if (targetTabId === undefined) {
+      const tabs = await chrome.tabs.query({});
+      const webTabs = tabs
+        .filter(
+          (tab) =>
+            typeof tab.id === "number" &&
+            Number.isInteger(tab.id) &&
+            tab.id > 0 &&
+            /^https?:/i.test(tab.url ?? ""),
+        )
+        .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
+      targetTabId = webTabs[0]?.id ?? lastWebTabId;
     }
 
-    if (attachedTabId !== undefined && attachedTabId !== tabId) {
+    if (targetTabId === undefined) {
+      throw new Error("Network capture requires an active browser tab.");
+    }
+    targetTabId = Number(targetTabId);
+    if (!Number.isInteger(targetTabId) || targetTabId <= 0) {
+      throw new Error("Network capture target tab ID is invalid.");
+    }
+
+    const tab = (await chrome.tabs.query({})).find(
+      (candidate) => candidate.id === targetTabId,
+    );
+    const url = tab?.url ?? "";
+    if (!createdTarget) {
+      if (/^(chrome|edge|about|devtools):/i.test(url)) {
+        throw new Error(`Cannot capture browser-internal URL: ${url}`);
+      }
+      if (!/^https?:/i.test(url)) {
+        throw new Error(`Cannot capture unsupported URL: ${url || "unknown"}`);
+      }
+    }
+
+    let targets: chrome.debugger.TargetInfo[];
+    try {
+      targets = await chrome.debugger.getTargets();
+    } catch (error) {
+      throw new Error(`Network capture could not inspect debugger targets: ${error}`);
+    }
+    const target = targets.find(
+      (candidate) => candidate.type === "page" && candidate.tabId === targetTabId,
+    );
+    if (typeof target?.id !== "string" || target.id.length === 0) {
+      throw new Error("Network capture target is not available to the debugger.");
+    }
+
+    if (attachedTabId !== undefined && attachedTabId !== targetTabId) {
       await detach();
     }
-    if (attachedTabId === tabId) {
+    if (attachedTabId === targetTabId && attachedTargetId === target.id) {
       captured.clear();
-      return;
+    } else {
+      try {
+        await chrome.debugger.attach(debuggee(target.id), DEBUGGER_VERSION);
+        await chrome.debugger.sendCommand(debuggee(target.id), "Network.enable");
+      } catch (error) {
+        throw new Error(
+          `Network capture could not attach to tab ${targetTabId} (target ${target.id}): ${error}`,
+        );
+      }
+      attachedTabId = targetTabId;
+      attachedTargetId = target.id;
+      captured.clear();
     }
 
-    await chrome.debugger.attach(debuggee(tabId), DEBUGGER_VERSION);
-    attachedTabId = tabId;
-    captured.clear();
-    await chrome.debugger.sendCommand(debuggee(tabId), "Network.enable");
+    if (createdTarget) {
+      await chrome.tabs.update(targetTabId, { url: options.url! });
+      await waitForTabLoad(targetTabId);
+    } else if (options.reload) {
+      await chrome.tabs.reload(targetTabId);
+      await waitForTabLoad(targetTabId);
+    }
+  }
+
+  async function waitForTabLoad(tabId: number): Promise<void> {
+    const tab = (await chrome.tabs.query({})).find(
+      (candidate) => candidate.id === tabId,
+    );
+    if (tab?.status === "complete") return;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        reject(new Error("Browser target tab did not finish loading."));
+      }, 15000);
+      const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+        if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
   }
 
   async function stopCapture(): Promise<void> {
@@ -349,8 +442,9 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
         });
 
       chrome.tabs.onActivated.addListener(({ tabId }) => {
-        void chrome.tabs.get(tabId).then((tab) => {
-          if (/^https?:/i.test(tab.url ?? "")) {
+        void chrome.tabs.query({}).then((tabs) => {
+          const tab = tabs.find((candidate) => candidate.id === tabId);
+          if (tab && /^https?:/i.test(tab.url ?? "")) {
             lastWebTabId = tabId;
           }
         }).catch(() => undefined);
@@ -425,12 +519,25 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
       });
 
       chrome.debugger.onDetach.addListener((source) => {
-        if (source.tabId === attachedTabId) attachedTabId = undefined;
+        if (source.tabId === attachedTabId) {
+          attachedTabId = undefined;
+          attachedTargetId = undefined;
+        }
       });
 
-      bus.on<{ tabId: number }, void>(
+      bus.on<
+        { tabId?: number; target?: "active"; url?: string; reload?: boolean },
+        void
+      >(
         MESSAGE_TYPE.NETWORK_CAPTURE_START,
-        ({ tabId }) => startCapture(tabId),
+        ({ tabId, target, url, reload }) =>
+          startCapture(
+            target === "active" ? undefined : tabId,
+            {
+              ...(url !== undefined ? { url } : {}),
+              ...(reload !== undefined ? { reload } : {}),
+            },
+          ),
       );
       bus.on<void, void>(MESSAGE_TYPE.NETWORK_CAPTURE_STOP, () => stopCapture());
       bus.on<void, NetworkRequest[]>(
