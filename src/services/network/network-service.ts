@@ -38,21 +38,18 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
   const captured = new Map<string, NetworkRequest>();
   const storage = createChromeStorageService();
   let attachedTabId: number | undefined;
-  let attachedTargetId: string | undefined;
   let lastWebTabId: number | undefined;
 
-  function debuggee(targetId: string): chrome.debugger.Debuggee {
-    return { targetId };
+  function debuggee(tabId: number): chrome.debugger.Debuggee {
+    return { tabId };
   }
 
   async function detach(): Promise<void> {
     if (attachedTabId === undefined) return;
-    const targetId = attachedTargetId;
+    const tabId = attachedTabId;
     attachedTabId = undefined;
-    attachedTargetId = undefined;
-    if (targetId === undefined) return;
     try {
-      await chrome.debugger.detach(debuggee(targetId));
+      await chrome.debugger.detach(debuggee(tabId));
     } catch {
       // The tab may have been closed or the debugger may already be detached.
     }
@@ -111,35 +108,24 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
       }
     }
 
-    let targets: chrome.debugger.TargetInfo[];
-    try {
-      targets = await chrome.debugger.getTargets();
-    } catch (error) {
-      throw new Error(`Network capture could not inspect debugger targets: ${error}`);
-    }
-    const target = targets.find(
-      (candidate) => candidate.type === "page" && candidate.tabId === targetTabId,
-    );
-    if (typeof target?.id !== "string" || target.id.length === 0) {
-      throw new Error("Network capture target is not available to the debugger.");
-    }
-
     if (attachedTabId !== undefined && attachedTabId !== targetTabId) {
       await detach();
     }
-    if (attachedTabId === targetTabId && attachedTargetId === target.id) {
+    if (attachedTabId === targetTabId) {
       captured.clear();
     } else {
       try {
-        await chrome.debugger.attach(debuggee(target.id), DEBUGGER_VERSION);
-        await chrome.debugger.sendCommand(debuggee(target.id), "Network.enable");
+        await chrome.debugger.attach(debuggee(targetTabId), DEBUGGER_VERSION);
+        await chrome.debugger.sendCommand(
+          debuggee(targetTabId),
+          "Network.enable",
+        );
       } catch (error) {
         throw new Error(
-          `Network capture could not attach to tab ${targetTabId} (target ${target.id}): ${error}`,
+          `Network capture could not attach to tab ${targetTabId}: ${error}`,
         );
       }
       attachedTabId = targetTabId;
-      attachedTargetId = target.id;
       captured.clear();
     }
 
@@ -521,7 +507,6 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
       chrome.debugger.onDetach.addListener((source) => {
         if (source.tabId === attachedTabId) {
           attachedTabId = undefined;
-          attachedTargetId = undefined;
         }
       });
 
