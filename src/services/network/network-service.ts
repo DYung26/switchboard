@@ -140,11 +140,77 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
     return updated;
   }
 
+  async function fetchUrl(
+    url: string,
+    method = "GET",
+    headers: Record<string, string> = {},
+  ): Promise<NetworkReplayResult> {
+    const parsedUrl = new URL(url);
+    const targetOrigin = parsedUrl.origin;
+    const tabs = await chrome.tabs.query({});
+    const targetTab = tabs.find((tab) => {
+      try {
+        return new URL(tab.url ?? "").origin === targetOrigin;
+      } catch {
+        return false;
+      }
+    });
+    let targetTabId = targetTab?.id;
+    let createdTabId: number | undefined;
+    if (targetTabId === undefined) {
+      const created = await chrome.tabs.create({ url, active: false });
+      if (created.id === undefined) throw new Error("Browser fetch could not create a target tab.");
+      targetTabId = created.id;
+      createdTabId = created.id;
+      await new Promise<void>((resolve, reject) => {
+        const listener = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+          if (tabId !== createdTabId || changeInfo.status !== "complete") return;
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+    }
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: targetTabId },
+      world: "MAIN",
+      func: async (input) => {
+        const requestHeaders = new Headers();
+        for (const [name, value] of Object.entries(input.headers)) {
+          try { requestHeaders.set(name, value); } catch { /* browser-controlled */ }
+        }
+        const response = await fetch(input.url, {
+          method: input.method,
+          headers: requestHeaders,
+          credentials: "include",
+        });
+        return {
+          status: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+          body: await response.text(),
+        };
+      },
+      args: [{ url, method, headers }],
+    });
+      const result = results[0]?.result as NetworkReplayResult | undefined;
+      if (!result) throw new Error("Network fetch returned no response.");
+      return result;
+    } finally {
+      if (createdTabId !== undefined) {
+        await chrome.tabs.remove(createdTabId).catch(() => undefined);
+      }
+    }
+  }
+
   async function replay(
     request: SavedNetworkRequest,
     tabId: number,
     sets: Array<{ path: string; value: string }> = [],
     replacements: Record<string, string> = {},
+    urlOverride?: string,
+    methodOverride?: string,
+    headersOverride?: Record<string, string>,
   ): Promise<NetworkReplayResult> {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
@@ -256,9 +322,9 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
         };
       },
       args: [{
-        url: request.url,
-        method: request.method,
-        headers: request.requestHeaders,
+        url: urlOverride ?? request.url,
+        method: methodOverride ?? request.method,
+        headers: headersOverride ?? request.requestHeaders,
         body: request.requestBody,
         sets,
         replacements,
@@ -371,6 +437,45 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
         MESSAGE_TYPE.NETWORK_CAPTURE_LIST,
         () => listCaptured(),
       );
+      bus.on<void, { captured: NetworkRequest[]; saved: SavedNetworkRequest[] }>(
+        MESSAGE_TYPE.NETWORK_LIST,
+        async () => ({
+          captured: await listCaptured(),
+          saved: await listSaved(),
+        }),
+      );
+      bus.on<
+        { id: string },
+        { kind: "captured"; request: NetworkRequest } | { kind: "saved"; request: SavedNetworkRequest }
+      >(MESSAGE_TYPE.NETWORK_GET, async ({ id }) => {
+        const capturedRequest = captured.get(id);
+        if (capturedRequest) return { kind: "captured", request: capturedRequest };
+
+        const savedRequest = (await listSaved()).find((item) => item.id === id);
+        if (savedRequest) return { kind: "saved", request: savedRequest };
+
+        throw new Error('Network request "' + id + '" not found.');
+      });
+      bus.on<{ requestId: string; name: string }, SavedNetworkRequest>(
+        MESSAGE_TYPE.NETWORK_SAVE,
+        async ({ requestId, name }) => {
+          const request = captured.get(requestId);
+          if (!request) {
+            throw new Error(
+              'Captured request "' + requestId + '" no longer exists.',
+            );
+          }
+          return saveRequest(request, name);
+        },
+      );
+      bus.on<{ id: string }, void>(
+        MESSAGE_TYPE.NETWORK_DELETE,
+        ({ id }) => deleteSaved(id),
+      );
+      bus.on<{ url: string; method?: string; headers?: Record<string, string> }, NetworkReplayResult>(
+        MESSAGE_TYPE.NETWORK_FETCH,
+        ({ url, method, headers }) => fetchUrl(url, method, headers),
+      );
       bus.on<void, SavedNetworkRequest[]>(
         MESSAGE_TYPE.NETWORK_SAVED_LIST,
         () => listSaved(),
@@ -419,9 +524,12 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
           target?: "active";
           sets?: Array<{ path: string; value: string }>;
           replacements?: Record<string, string>;
+          url?: string;
+          method?: string;
+          headers?: Record<string, string>;
         },
         NetworkReplayResult
-      >(MESSAGE_TYPE.NETWORK_REPLAY, async ({ id, tabId, target, sets, replacements }, sender) => {
+      >(MESSAGE_TYPE.NETWORK_REPLAY, async ({ id, tabId, target, sets, replacements, url, method, headers }, sender) => {
         const request = (await listSaved()).find((item) => item.id === id);
         if (!request) {
           throw new Error('Saved request "' + id + '" not found.');
@@ -432,11 +540,35 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
           targetTabId = lastWebTabId;
         }
 
+        let createdTabId: number | undefined;
+        if (targetTabId === undefined && url !== undefined) {
+          const created = await chrome.tabs.create({ url, active: false });
+          if (created.id === undefined) {
+            throw new Error("Network replay could not create a target tab.");
+          }
+          targetTabId = created.id;
+          createdTabId = created.id;
+          await new Promise<void>((resolve) => {
+            const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+              if (updatedTabId !== createdTabId || changeInfo.status !== "complete") return;
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+          });
+        }
+
         if (targetTabId === undefined) {
           throw new Error("Network replay requires an active browser tab.");
         }
 
-        return replay(request, targetTabId, sets, replacements);
+        try {
+          return await replay(request, targetTabId, sets, replacements, url, method, headers);
+        } finally {
+          if (createdTabId !== undefined) {
+            await chrome.tabs.remove(createdTabId).catch(() => undefined);
+          }
+        }
       });
     },
   };
