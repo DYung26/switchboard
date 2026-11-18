@@ -20,8 +20,9 @@ import { SaveAccountForm } from "./components/SaveAccountForm";
 import { RenameAccountForm } from "./components/RenameAccountForm";
 import { RawAccountView } from "./components/RawAccountView";
 import { NetworkView } from "./components/NetworkView";
+import { SessionSaveView } from "./components/SessionSaveView";
 
-type View = "list" | "save" | "raw" | "network";
+type View = "list" | "save" | "raw" | "network" | "session";
 
 interface RenameState {
   accountId: string;
@@ -63,6 +64,7 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
   const [theme, setTheme] = useTheme();
   const [accounts, setAccounts] = useState<SavedAccount[]>([]);
   const [view, setView] = useState<View>("list");
+  const [autoSaveSession, setAutoSaveSession] = useState(false);
   const [renaming, setRenaming] = useState<RenameState | undefined>(undefined);
   const [viewingAccountId, setViewingAccountId] = useState<
     string | undefined
@@ -344,6 +346,7 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
   }
 
   const hostname = new URL(origin).hostname;
+  const supportsAiSP = ["chatgpt.com", "chat.openai.com", "claude.ai"].includes(hostname);
   const existingNames = accounts.map((a) => a.name);
 
   return (
@@ -393,8 +396,51 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
         )}
       </header>
 
+      {view === "list" && supportsAiSP && (
+        <div className="session-save-launch">
+          <div className="session-save-launch__copy">
+            <strong>AiSP session</strong>
+            <span>Save this conversation to your session archive</span>
+          </div>
+          <div className="session-save-launch__actions">
+            <button
+              className="btn btn--primary btn--sm"
+              onClick={() => {
+                setAutoSaveSession(true);
+                setView("session");
+              }}
+              disabled={activeTabId === undefined}
+            >
+              Save
+            </button>
+            <button
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                setAutoSaveSession(false);
+                setView("session");
+              }}
+              disabled={activeTabId === undefined}
+              title="Edit AiSP connection and session metadata"
+            >
+              Settings
+            </button>
+          </div>
+        </div>
+      )}
+
       {view === "network" && activeTabId !== undefined && (
         <NetworkView tabId={activeTabId} onBack={() => setView("list")} />
+      )}
+
+      {view === "session" && activeTabId !== undefined && (
+        <SessionSaveView
+          tabId={activeTabId}
+          autoSave={autoSaveSession}
+          onBack={() => {
+            setAutoSaveSession(false);
+            setView("list");
+          }}
+        />
       )}
 
       {error && (

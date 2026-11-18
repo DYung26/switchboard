@@ -24,6 +24,7 @@ export const MESSAGE_TYPE = {
   ACCOUNT_REORDER: "switchboard/account/reorder",
   NETWORK_CAPTURE_START: "switchboard/network/capture/start",
   NETWORK_CAPTURE_STOP: "switchboard/network/capture/stop",
+  NETWORK_SESSION_SAVE: "switchboard/network/session/save",
   NETWORK_CAPTURE_LIST: "switchboard/network/capture/list",
   NETWORK_LIST: "switchboard/network/list",
   NETWORK_GET: "switchboard/network/get",

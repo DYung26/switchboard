@@ -18,13 +18,14 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
 export async function sendMessage<TPayload, TResponse>(
   type: string,
   payload: TPayload,
+  timeoutMs = MESSAGE_RESPONSE_TIMEOUT_MS,
 ): Promise<TResponse> {
   const envelope: MessageEnvelope<string, TPayload> = { type, payload };
   const response = await withTimeout(
     chrome.runtime.sendMessage<MessageEnvelope<string, TPayload>, unknown>(
       envelope,
     ),
-    MESSAGE_RESPONSE_TIMEOUT_MS,
+    timeoutMs,
   );
 
   if (isErrorResponse(response)) {

@@ -24,4 +24,6 @@ export const activeAccountStorageKey = (origin: string): string =>
 
 export const SORT_ORDER_STORAGE_KEY = "settings:sort-order";
 
+export const AISP_SESSION_SETTINGS_KEY = "aisp:session-save-settings";
+
 export const DEFAULT_SORT_ORDER: SortOrder = SORT_ORDER.CUSTOM;

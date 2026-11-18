@@ -8,6 +8,8 @@ export interface NetworkRequest {
   status?: number;
   responseHeaders?: Record<string, string>;
   responseBody?: string;
+  responseBodyError?: string;
+  loadingFinished?: boolean;
   mimeType?: string;
   capturedAt: number;
 }
