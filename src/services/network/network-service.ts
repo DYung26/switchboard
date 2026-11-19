@@ -137,26 +137,6 @@ export function createNetworkService(bus: MessageBus): BackgroundService {
     }
   }
 
-  async function waitForTabLoad(tabId: number): Promise<void> {
-    const tab = (await chrome.tabs.query({})).find(
-      (candidate) => candidate.id === tabId,
-    );
-    if (tab?.status === "complete") return;
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        chrome.tabs.onUpdated.removeListener(listener);
-        reject(new Error("Browser target tab did not finish loading."));
-      }, 15000);
-      const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
-        if (updatedTabId !== tabId || changeInfo.status !== "complete") return;
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-    });
-  }
-
   async function stopCapture(): Promise<void> {
     await detach();
   }
