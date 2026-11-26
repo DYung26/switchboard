@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>APIScribe bridge · Switchboard</title>
+    <style>
+      :root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+      body { max-width: 42rem; margin: 3rem auto; padding: 0 1.25rem; }
+      label { display: block; margin: 1rem 0 .35rem; font-weight: 600; }
+      input { box-sizing: border-box; width: 100%; padding: .7rem; border: 1px solid #8888; border-radius: .4rem; font: inherit; }
+      button { margin: 1rem .5rem 0 0; padding: .65rem 1rem; border: 1px solid #8888; border-radius: .4rem; font: inherit; cursor: pointer; }
+      #status { margin-top: 1.5rem; white-space: pre-wrap; }
+      .muted { opacity: .7; }
+    </style>
+  </head>
+  <body>
+    <h1>APIScribe browser bridge</h1>
+    <p class="muted">This extension page connects APIScribe to browser providers through Switchboard. Provider adapters run inside the browser; credentials remain in the browser.</p>
+    <label for="base-url">APIScribe server URL</label>
+    <input id="base-url" type="url" placeholder="https://apiscribe.example.com" autocomplete="url" />
+    <label for="token">Bridge token</label>
+    <input id="token" type="password" autocomplete="off" />
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <p id="status">Disconnected</p>
+    <script src="bridge.js" defer></script>
+  </body>
+</html>

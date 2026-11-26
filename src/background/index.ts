@@ -10,6 +10,7 @@ import { createSessionEngine } from "@/services/snapshot/session-engine";
 import { createChromeStorageService } from "@/storage";
 import { createLogger } from "@/utils/logger";
 import { createNetworkService } from "@/services/network";
+import { createBrowserProviderService, createChatGptProviderAdapter } from "@/services/providers";
 
 (globalThis as typeof globalThis & { __SWITCHBOARD_EXTENSION__?: boolean }).__SWITCHBOARD_EXTENSION__ = true;
 
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   registry.register(createSnapshotService(bus));
   registry.register(createAccountService(bus, engine, repository));
   registry.register(createNetworkService(bus));
+  registry.register(createBrowserProviderService(bus, [createChatGptProviderAdapter()]));
 
   await registry.initAll();
   logger.info("Background service worker initialized");

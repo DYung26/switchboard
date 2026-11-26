@@ -3,11 +3,11 @@ import { createCollectorRegistry } from "./collector-registry";
 import { createCaptureSessionService } from "./capture-session-service";
 import { createClearSessionService } from "./clear-session-service";
 import { createRestoreSessionService } from "./restore-session-service";
-import { getActiveTabContext } from "./tab-locator";
+import { getActiveTabContext, type ActiveTabContext } from "./tab-locator";
 
 export interface SessionEngine {
   captureCurrentSession(): Promise<SessionSnapshot>;
-  restoreSession(snapshot: StoredSessionSnapshot): Promise<void>;
+  restoreSession(snapshot: StoredSessionSnapshot, context?: ActiveTabContext): Promise<void>;
   clearCurrentSession(): Promise<void>;
 }
 

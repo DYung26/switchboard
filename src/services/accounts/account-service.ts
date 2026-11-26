@@ -16,6 +16,10 @@ interface AccountRefPayload {
   origin: string;
 }
 
+interface AccountSwitchForTabPayload extends AccountRefPayload {
+  tabId: number;
+}
+
 interface RenamePayload extends AccountRefPayload {
   name: string;
 }
@@ -129,6 +133,23 @@ export function createAccountService(
         async ({ accountId, origin }) => {
           const account = await requireAccount(origin, accountId);
           await engine.restoreSession(account.snapshot);
+          await repository.upsert({ ...account, lastUsed: Date.now() });
+          await repository.setActiveId(origin, accountId);
+        },
+      );
+
+      bus.on<AccountSwitchForTabPayload, void>(
+        MESSAGE_TYPE.ACCOUNT_SWITCH_FOR_TAB,
+        async ({ accountId, origin, tabId }) => {
+          if (!Number.isInteger(tabId) || tabId < 0) {
+            throw new Error("Target browser tab ID is invalid.");
+          }
+          const tab = await chrome.tabs.get(tabId);
+          if (!tab.url || new URL(tab.url).origin !== origin) {
+            throw new Error("Target browser tab does not match the account origin.");
+          }
+          const account = await requireAccount(origin, accountId);
+          await engine.restoreSession(account.snapshot, { tabId, origin });
           await repository.upsert({ ...account, lastUsed: Date.now() });
           await repository.setActiveId(origin, accountId);
         },
