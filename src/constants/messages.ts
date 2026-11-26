@@ -17,6 +17,7 @@ export const MESSAGE_TYPE = {
   ACCOUNT_LIST: "switchboard/account/list",
   ACCOUNT_SAVE: "switchboard/account/save",
   ACCOUNT_SWITCH: "switchboard/account/switch",
+  ACCOUNT_SWITCH_FOR_TAB: "switchboard/account/switch-for-tab",
   ACCOUNT_RENAME: "switchboard/account/rename",
   ACCOUNT_REPLACE: "switchboard/account/replace",
   ACCOUNT_DUPLICATE: "switchboard/account/duplicate",
@@ -36,6 +37,9 @@ export const MESSAGE_TYPE = {
   NETWORK_SAVED_DELETE: "switchboard/network/saved/delete",
   NETWORK_SAVED_UPDATE: "switchboard/network/saved/update",
   NETWORK_REPLAY: "switchboard/network/replay",
+  PROVIDER_GET: "switchboard/provider/get",
+  PROVIDER_CHAT_COMPLETION_CREATE: "switchboard/provider/chat-completion/create",
+  PROVIDER_CONVERSATION_GET: "switchboard/provider/conversation/get",
 } as const;
 
 export type MessageType = (typeof MESSAGE_TYPE)[keyof typeof MESSAGE_TYPE];

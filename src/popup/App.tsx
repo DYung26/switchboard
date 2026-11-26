@@ -381,6 +381,13 @@ export function App({ variant = "popup" }: AppProps = {}): JSX.Element {
               Network
             </button>
             <button
+              className="btn btn--ghost btn--sm"
+              onClick={() => void chrome.tabs.create({ url: chrome.runtime.getURL("bridge.html") })}
+              title="Open APIScribe browser bridge"
+            >
+              API
+            </button>
+            <button
               className="btn btn--primary btn--sm"
               onClick={() => {
                 setView("save");

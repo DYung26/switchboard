@@ -1,7 +1,7 @@
 import type { CollectorRegistry } from "./collector-registry";
 import { listMechanisms } from "./collector-registry";
 import type { ClearSessionService } from "./clear-session-service";
-import { getActiveTabContext } from "./tab-locator";
+import { getActiveTabContext, type ActiveTabContext } from "./tab-locator";
 import { migrateSnapshot } from "./snapshot-migration";
 import { assertValidSnapshot } from "./snapshot-validator";
 import {
@@ -20,7 +20,7 @@ import { createLogger } from "@/utils/logger";
 const logger = createLogger("background");
 
 export interface RestoreSessionService {
-  restoreSession(snapshot: StoredSessionSnapshot): Promise<void>;
+  restoreSession(snapshot: StoredSessionSnapshot, context?: ActiveTabContext): Promise<void>;
 }
 
 // See `captureMechanism` in `capture-session-service.ts` for why this
@@ -40,8 +40,8 @@ export function createRestoreSessionService(
   clearSessionService: ClearSessionService,
 ): RestoreSessionService {
   return {
-    async restoreSession(stored: StoredSessionSnapshot): Promise<void> {
-      const { tabId, origin } = await getActiveTabContext();
+    async restoreSession(stored: StoredSessionSnapshot, context?: ActiveTabContext): Promise<void> {
+      const { tabId, origin } = context ?? await getActiveTabContext();
 
       // Snapshots are persisted to `chrome.storage.local` and can outlive
       // the extension version that wrote them, so a "current schema"

@@ -116,6 +116,10 @@ describe("createAccountService", () => {
         query: vi.fn(async () => [
           { id: 7, url: "https://example.com/dashboard" },
         ]),
+        get: vi.fn(async (id: number) => ({
+          id,
+          url: "https://example.com/dashboard",
+        })),
       },
     });
   });
@@ -191,6 +195,44 @@ describe("createAccountService", () => {
     expect(engine.restoreSession).toHaveBeenCalledWith(account.snapshot);
     const updated = await repository.getById(account.origin, account.id);
     expect(updated?.lastUsed).toBeTypeOf("number");
+  });
+
+  it("switches an account in an explicitly targeted tab", async () => {
+    const account = buildAccount();
+    const engine = buildFakeEngine();
+    const repository = buildFakeRepository([account]);
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, engine, repository).init();
+
+    await trigger(MESSAGE_TYPE.ACCOUNT_SWITCH_FOR_TAB, {
+      accountId: account.id,
+      origin: account.origin,
+      tabId: 7,
+    });
+
+    expect(engine.restoreSession).toHaveBeenCalledWith(account.snapshot, {
+      tabId: 7,
+      origin: account.origin,
+    });
+    await expect(repository.getActiveId(account.origin)).resolves.toBe(account.id);
+  });
+
+  it("rejects explicit account switching when the target tab has another origin", async () => {
+    vi.mocked(chrome.tabs.get).mockResolvedValue({
+      id: 7,
+      url: "https://different.example.com/",
+    } as chrome.tabs.Tab);
+    const account = buildAccount();
+    const engine = buildFakeEngine();
+    const { bus, trigger } = buildFakeBus();
+    createAccountService(bus, engine, buildFakeRepository([account])).init();
+
+    await expect(trigger(MESSAGE_TYPE.ACCOUNT_SWITCH_FOR_TAB, {
+      accountId: account.id,
+      origin: account.origin,
+      tabId: 7,
+    })).rejects.toThrow("Target browser tab does not match the account origin.");
+    expect(engine.restoreSession).not.toHaveBeenCalled();
   });
 
   it("marks the switched-to account as active for its origin", async () => {

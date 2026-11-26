@@ -62,6 +62,8 @@ The background worker also exposes this network replay capability to the
 EchoProfile browser-control bridge. EchoProfile owns the Playwright browser;
 Switchboard remains responsible for the actual browser-authenticated request.
 
+Switchboard also provides a dedicated APIScribe bridge page. It receives provider-neutral browser jobs from APIScribe and routes them to registered provider adapters through the internal message bus; it does not expose general network replay to external callers.
+
 ## Stack
 
 - **Vite** + **@crxjs/vite-plugin** — bundles the extension and keeps the
